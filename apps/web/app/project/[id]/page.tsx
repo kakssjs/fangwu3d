@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, use, Suspense, lazy, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
-import { describeRoomLayout, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
+import { analyzeRoomLayout, type ExpectedWalls, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
 import { agentOf } from '@/lib/agents';
@@ -31,14 +31,44 @@ interface DecorationImage {
   b64?: string;
   /** 该房间的版面描述（门窗位置，来自户型几何），重新生成和对话修改时都带上，保持和图纸一致 */
   layout?: string;
+  /** 户型图里这个房间三面墙上应有的窗和门的数量，用来核对生成的图 */
+  expected?: ExpectedWalls;
+  /** 生成后的核对结果：没有这个字段表示没核对过 */
+  check?: RenderCheck;
+  /** 没有真实户型图作依据（房间和门窗是系统按面积估的）：这张图只是示意 */
+  estimated?: boolean;
   /** 这个房间之前生成过的版本（不含当前图），旧的在前 */
   history?: DecorationVersion[];
 }
+
+interface RenderCheck { ok: boolean; tries: number; issues: string[] }
 
 interface DecorationVersion {
   prompt: string;
   url?: string;
   b64?: string;
+  layout?: string;
+  expected?: ExpectedWalls;
+  check?: RenderCheck;
+  estimated?: boolean;
+}
+
+/** 当前户型下一个房间的信息。fromPlan=false 表示没有业主的户型图，房间和门窗是系统估的，不能当真。 */
+interface PlanRoomInfo { name: string; area: number; layout: string; expected?: ExpectedWalls; fromPlan: boolean }
+
+/** 一张图现在该显示什么状态：对不对、有没有核对、是不是已经过期。 */
+function renderStatus(img: DecorationImage, current?: PlanRoomInfo): { tone: 'ok' | 'warn' | 'info'; text: string } {
+  if (img.layout && current?.layout && img.layout !== current.layout) {
+    return { tone: 'warn', text: '户型已修改，这张图可能和现在的户型不一致，建议重新生成' };
+  }
+  if (img.check?.ok) {
+    return { tone: 'ok', text: `✓ 已核对：三面墙上的窗和门数量与户型图一致${img.check.tries > 1 ? `（重新生成到第 ${img.check.tries} 次才通过）` : ''}` };
+  }
+  if (img.check) {
+    return { tone: 'warn', text: `⚠ 没能通过核对：${img.check.issues.join('、') || '门窗数量不符'}（已生成 ${img.check.tries} 次，留的是最接近的一张）。可以重新生成，或在对话里让 AI 改` };
+  }
+  if (img.layout) return { tone: 'info', text: '按户型图的门窗描述生成，但没有核对' };
+  return { tone: 'info', text: '示意图：不是按户型图生成的（还没有户型图，或生成时没有）。在上方工作台识别户型图后重新生成，才会按图并核对' };
 }
 
 const MAX_HISTORY = 20;
@@ -46,7 +76,9 @@ const MAX_HISTORY = 20;
 /** 新图成为当前图时，把原来的当前图放进历史（只保留最近 MAX_HISTORY 个）。 */
 function withHistory(next: DecorationImage, prev?: DecorationImage): DecorationImage {
   const history = [...(prev?.history ?? [])];
-  if (prev && (prev.url || prev.b64)) history.push({ prompt: prev.prompt, url: prev.url, b64: prev.b64 });
+  if (prev && (prev.url || prev.b64)) {
+    history.push({ prompt: prev.prompt, url: prev.url, b64: prev.b64, layout: prev.layout, expected: prev.expected, check: prev.check, estimated: prev.estimated });
+  }
   return { ...next, history: history.slice(-MAX_HISTORY) };
 }
 
@@ -191,23 +223,30 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const handleStd = useCallback((u: string | null) => setStdUrl(u), []);
 
   // 根据房型图生成各房间渲染图（Agnes）：识别/手绘的房间有几个生成几个
+  /**
+   * 当前户型下的房间。只有业主上传、识别或手绘的户型图（studioRects）才有真实的房间和门窗，
+   * 才给出版面描述和核对用的数量；Agent 在没有户型图时按面积估出来的布局是编的，只给名字和面积，图标「示意」。
+   */
+  function planRooms(): PlanRoomInfo[] {
+    if (studioRects.length > 0) {
+      try {
+        const geom = geometryFromStudioRects(studioRects, Number(data!.project.area) || undefined);
+        return geom.rooms.map((r, i) => {
+          const a = analyzeRoomLayout(geom, i);
+          return { name: r.name, area: r.area, layout: a?.text ?? '', expected: a?.expected, fromPlan: true };
+        });
+      } catch { /* 几何建不出来：退回只有名字和面积 */ }
+    }
+    const rooms = studioRects.length > 0 ? studioRects.map(r => ({ name: r.name, area: 0 })) : (plan?.rooms ?? []);
+    return rooms.map(r => ({ name: r.name, area: r.area, layout: '', fromPlan: false }));
+  }
+
   async function generateRoomRenderings() {
     if (genRoomsBusy) return;
     setGenRoomsBusy(true);
     try {
-      // 房间源：用户识别/手绘的房间（studioRects）优先，Agent 识别/启发式（plan.rooms）兜底。
-      // 尺寸和门窗取自与 3D 建模同一份几何，渲染图才能和图纸对得上。
-      let geom: PlanGeometry | null = null;
-      try {
-        geom = studioRects.length
-          ? geometryFromStudioRects(studioRects, Number(data!.project.area) || undefined)
-          : (plan?.geometry ?? null);
-      } catch {
-        geom = plan?.geometry ?? null;
-      }
-      const rooms: { name: string; area: number; layout: string }[] = geom
-        ? geom.rooms.map((r, i) => ({ name: r.name, area: r.area, layout: describeRoomLayout(geom!, i) }))
-        : (plan?.rooms ?? []).map(r => ({ ...r, layout: '' }));
+      // 房间源：用户识别/手绘的房间优先（尺寸和门窗取自与 3D 建模同一份几何），没有才用 Agent 估的（只当示意）
+      const rooms = planRooms();
       // 有几个房间生成几张，不设上限
       const target = rooms.filter(r => r.name && r.area > 0);
       if (target.length === 0) return;
@@ -227,13 +266,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             const res = await fetch('/api/agnes/generate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prompt, size: '1K', ratio: '16:9' }),
+              // expected：让服务端生成后数一数三面墙上的窗和门，对不上就带纠正重新生成（见 lib/render-check.ts）
+              body: JSON.stringify({ prompt, size: '1K', ratio: '16:9', expected: room.expected }),
             });
-            const j = await res.json() as { url?: string; b64_json?: string };
-            const fresh: DecorationImage = { room: room.name, prompt, layout: room.layout, url: j.url, b64: j.b64_json };
+            const j = await res.json() as { url?: string; b64_json?: string; check?: RenderCheck };
+            const fresh: DecorationImage = { room: room.name, prompt, layout: room.layout, expected: room.expected, check: j.check, estimated: !room.fromPlan, url: j.url, b64: j.b64_json };
             imgs[i] = fresh.url || fresh.b64 ? withHistory(fresh, prev) : (prev ?? fresh);
           } catch {
-            imgs[i] = prev ?? { room: room.name, prompt, layout: room.layout };
+            imgs[i] = prev ?? { room: room.name, prompt, layout: room.layout, expected: room.expected, estimated: !room.fromPlan };
           }
           doneCount += 1;
           setGenRoomsProgress(`${doneCount}/${target.length}`);
@@ -311,14 +351,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           style: data?.project.style,
           room: roomName,
           layout: currentImg?.layout,
+          expected: currentImg?.expected,
         }),
       });
       const json = await res.json();
       if (json.url || json.b64_json) {
-        const newImg = withHistory({ room: roomName, prompt: msg, layout: currentImg?.layout, url: json.url, b64: json.b64_json }, currentImg);
+        const newImg = withHistory({ room: roomName, prompt: msg, layout: currentImg?.layout, expected: currentImg?.expected, estimated: currentImg?.estimated, check: json.check, url: json.url, b64: json.b64_json }, currentImg);
         const nextImgs = decorations.map((d, i) => i === selectedIdx ? newImg : d);
         setDecorations(nextImgs);
-        setChatMessages(prev => [...prev, { role: 'assistant', content: `已根据"${msg}"重新生成 ${roomName} 装饰图`, imageUrl: json.url || `data:image/png;base64,${json.b64_json}` }]);
+        setChatMessages(prev => [...prev, { role: 'assistant', content: `已根据"${msg}"重新生成 ${roomName} 装饰图${json.check && !json.check.ok ? `（但门窗没通过核对：${(json.check.issues as string[]).join('、')}）` : ''}`, imageUrl: json.url || `data:image/png;base64,${json.b64_json}` }]);
         // 持久化替换结果（覆盖式，刷新后不丢）
         void persistDecorations(nextImgs);
       } else {
@@ -336,7 +377,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const chosen = cur?.history?.[k];
     if (!cur || !chosen || chatBusy) return;
     const restored = withHistory(
-      { room: cur.room, prompt: chosen.prompt, layout: cur.layout, url: chosen.url, b64: chosen.b64 },
+      { room: cur.room, prompt: chosen.prompt, layout: chosen.layout, expected: chosen.expected, check: chosen.check, estimated: chosen.estimated, url: chosen.url, b64: chosen.b64 },
       { ...cur, history: (cur.history ?? []).filter((_, j) => j !== k) },
     );
     const nextImgs = decorations.map((d, i) => (i === selectedIdx ? restored : d));
@@ -739,6 +780,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             基于房型图房间（{(studioRects.length ? studioRects.map(r => r.name) : (plan?.rooms ?? []).map(r => r.name)).join('、') || '识别后可用'}）· 共 {(studioRects.length || (plan?.rooms ?? []).length) || 0} 间，有几个生成几张 · {data.project.style} 风格
           </span>
         </div>
+        {studioRects.length === 0 && (
+          <div className="notice notice-warn" style={{ margin: '8px 0 4px', fontSize: 12 }}>
+            还没有户型图：下面的房间和门窗是系统按面积估的，不是真实布局，渲染图只是示意，也不会核对。
+            请在上方工作台上传户型图（或框出房间），点「AI 识别房间」，核对门窗后再生成。
+          </div>
+        )}
         {/* 房间选择 */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0 16px' }}>
             {decorations.map((d, i) => {
@@ -769,6 +816,19 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 ) : (
                   <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>图片生成中或失败，请通过下方对话重新生成</div>
                 )}
+              </div>
+            );
+          })()}
+
+          {/* 这张图的核对状态：对不对、有没有核对、户型改了之后是否已过期 */}
+          {(() => {
+            const cur = decorations[selectedIdx];
+            if (!cur || !(cur.url || cur.b64)) return null;
+            const ord = decorations.slice(0, selectedIdx).filter(x => x.room === cur.room).length;
+            const status = renderStatus(cur, planRooms().filter(r => r.name === cur.room)[ord]);
+            return (
+              <div className={`notice ${status.tone === 'ok' ? 'notice-ok' : status.tone === 'warn' ? 'notice-warn' : ''}`} style={{ marginTop: 10, fontSize: 12 }}>
+                {status.text}
               </div>
             );
           })()}

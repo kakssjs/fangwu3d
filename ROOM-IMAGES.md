@@ -145,7 +145,57 @@ and 1 in the bathroom; the 3D model rebuilt (8 walls, no warnings); adding a win
 position and width with the real controls drew it on the right wall of the bathroom, and deleting it
 removed it. **Not tested:** dragging openings directly on the plan (not built: the list controls are used instead), and a phone-width screen.
 
-## 6. Verification and open items
+## 6. Checking what the AI produces (new)
+
+**The problem.** Everything the AI produced was saved and treated as fact: recognition results, room
+renders and, when there was no floor plan, rooms and doors the system had simply invented. A wrong
+answer then stayed forever. Each step below was measured on a test plan with a known answer, and the
+results, including the ones that did not help, are listed here.
+
+**6.1 Recognition by agreement (`lib/recognition.ts`, `/api/mimo/recognize`).** The route asks MiMo
+three times in parallel and keeps only the rooms, doors and windows that at least two runs agree on
+(`runs` can be set 1 to 5). Every opening records how many runs saw it (`conf`). Openings the runs did
+not all agree on show an amber "待核对 ✓" button in the review list; editing one, or pressing ✓, counts
+as the owner confirming it. The tool says how many need checking.
+- *What the numbers say.* Looking at the detections themselves: seen by 1 run, 45% were real; by 2 runs,
+  83%; by all 3, 95%. So agreement is a good confidence signal, and majority agreement cuts the false
+  openings from 3.7 to 0.8 per plan.
+- *What did not help.* Scored end to end (opening in the right room, wall and part of the wall), three-run
+  agreement was no better than one run: 81% against 83% found, 18 against 20 false openings over 6 runs.
+  The model makes the same mistakes every time, and the room-assignment step adds its own noise.
+  So agreement is used for **flagging**, not as a promise of correctness. A "zoom in and ask again" check
+  was also tried (16 of 19 right) and rejected: it dropped real doors and added nothing on top of the votes.
+
+**6.2 Every render is checked (`lib/render-check.ts`, `/api/agnes/generate`, `/api/agnes/chat`).**
+After a picture is generated, MiMo counts the windows and doors on the far, left and right walls, and
+the count is compared with what the plan says (`analyzeRoomLayout` gives the expected numbers). If it
+does not match, the picture is regenerated with a specific correction ("the left wall must have exactly 1
+door, the previous picture had 2"), up to 3 times. The closest picture is kept and the result is saved
+with it (`check`: passed or not, how many tries, what is still wrong). If the check itself cannot run, the
+picture is saved as "not checked", never as passed. Chat edits are checked the same way.
+- *Can MiMo count?* On 5 pictures whose contents I had judged by eye, it agreed in 14 of 15 runs and
+  found exactly the extra doors I saw.
+- *The cause of the failures, found by measuring.* The first version passed only 3 of 12 pictures on the first
+  try, and the retries rescued just 1 more. The extra doors were exactly the ones the prompt listed
+  for "the wall behind the camera", which a picture cannot show, so the AI drew them in view. Leaving
+  that wall out of the prompt took it to **12 of 12 on the first try**, with the average time per picture
+  dropping from 52 s to 24 s. In the browser, 4 of 4 rooms passed, one on its second try.
+
+**6.3 Estimates are labelled, and old pictures are flagged (`page.tsx`).**
+- A project with no owner floor plan has rooms and doors the system invented (the agent labels them
+  `rule_engine`/`mimo`, not `user_studio`). The panel now says so, such pictures are labelled "示意图", and no
+  layout is claimed or checked for them.
+- Each picture shows its state: "✓ 已核对", "⚠ 没能通过核对: 左墙多了 1 扇门（已生成 3 次，留的是最接近的一张）", "按户型图的门窗描述生成，但没有核对", or the estimate
+  label. If the plan is edited afterwards (a door deleted, a room moved), the picture is marked "户型已修改，可能不一致"
+  at once, without regenerating anything. Restoring an older version brings back that version's own
+  layout and check result.
+
+**Limits.** The check uses the same kind of AI to count, so it can be wrong in both directions; it
+counts only what is visible on three walls and ignores size and style. It was measured on one test plan.
+A checked picture is "very likely consistent with the plan's openings", not a guarantee. The first
+generation can now take longer when a retry is needed (up to about 1.5 minutes per picture in the worst case).
+
+## 7. Verification and open items
 
 - **Type check** `npx tsc -b` and **production build** `next build` pass. The two config files
   Next rewrites during a build were restored from the backup.
