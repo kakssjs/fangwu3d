@@ -93,6 +93,19 @@ BOSS_PASSWORD=    at least 8 characters
 On a real server set all three as environment variables, with a different secret. Changing
 `SESSION_SECRET` signs everyone out.
 
+### If `SESSION_SECRET` is not set
+
+`.env.local` is git-ignored, so a copy of the site on another machine does not have it. Originally that
+made **every sign-in return 500 and every sign-up fail** ("登录失败" / "注册失败"), and a sign-up created
+the account and then failed to start the session. Reproduced and fixed: if `SESSION_SECRET` is missing
+(or shorter than 32 characters), the site generates a random one on first use and keeps it in
+`apps/web/.session-secret` (git-ignored, so restarts don't sign people out; it logs a warning). If the
+file can't be written (read-only host), the secret lives only in memory and everyone has to sign in
+again after a restart. For a real deployment, still set `SESSION_SECRET` in the environment; the file
+is a safety net, and deleting it signs everyone out. Tested with no secret configured: sign-up, sign-in,
+wrong password, and a session surviving a restart. Accounts left half-created by the broken sign-up
+work normally now.
+
 ## 6. Verification
 
 - **Type check:** `npx tsc -b` passes. **Production build:** `next build` passes (19 routes).
