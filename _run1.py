@@ -1,0 +1,11 @@
+p = 'D:/lhb/i-renovation/_t1.txt'
+f = open(p, 'w')
+n = chr(10)
+q = chr(39)
+Lb = chr(123)
+Rb = chr(125)
+f.write('              ' + Lb + 'tab === ' + q + 'projects' + q + ' && (' + n)
+f.write('                <>' + n)
+f.write('                  ' + Lb + 'openOrders.length === 0 ? (' + n)
+f.close()
+print('ok')

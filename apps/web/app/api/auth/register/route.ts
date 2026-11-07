@@ -1,0 +1,73 @@
+import { NextResponse } from 'next/server';
+import { createUser, getUserByPhone } from '@i-renovation/shared';
+
+type RegisterBody = {
+  role?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  password?: string;
+  companyName?: string;
+  license?: string;
+  qualifications?: string[];
+  districts?: string[];
+  serviceTypes?: string[];
+  specialties?: string[];
+};
+
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as RegisterBody;
+    const role = body.role;
+
+    if (role !== 'homeowner' && role !== 'company') {
+      return NextResponse.json({ error: 'role 必须为 homeowner 或 company' }, { status: 400 });
+    }
+
+    const name = (body.name ?? '').trim();
+    const phone = (body.phone ?? '').trim();
+    const email = body.email?.trim() || undefined;
+    const password = body.password?.trim() || undefined;
+
+    if (!name) return NextResponse.json({ error: '请填写姓名' }, { status: 400 });
+    if (!phone) return NextResponse.json({ error: '请填写手机号' }, { status: 400 });
+
+    // 防止重复注册：同一手机号只能注册一次
+    const existing = await getUserByPhone(phone);
+    if (existing) {
+      return NextResponse.json({ error: '该手机号已注册，请直接登录' }, { status: 409 });
+    }
+
+    if (role === 'homeowner') {
+      const user = await createUser({
+        role: 'homeowner',
+        name,
+        phone,
+        email,
+        passwordHash: password,
+      });
+      return NextResponse.json({ id: user.id, role: user.role });
+    }
+
+    // role === 'company'
+    const companyName = (body.companyName ?? '').trim();
+    if (!companyName) return NextResponse.json({ error: '请填写公司名称' }, { status: 400 });
+
+    const user = await createUser({
+      role: 'company',
+      name,
+      phone,
+      email,
+      passwordHash: password,
+      companyName,
+      license: body.license?.trim() || undefined,
+      qualifications: body.qualifications,
+      districts: body.districts,
+      serviceTypes: body.serviceTypes,
+      specialties: body.specialties,
+    });
+    return NextResponse.json({ id: user.id, role: user.role });
+  } catch {
+    return NextResponse.json({ error: '注册失败' }, { status: 400 });
+  }
+}

@@ -1,0 +1,112 @@
+              {tab === 'projects' && (
+                <>
+                  {openOrders.length === 0 ? (
+              {tab === 'projects' && (
+                <>
+                  {openOrders.length == 0 ? (
+                    <div className="panel empty-state"><p>No open projects</p></div>
+                  ) : (
+                    <div style={{display='grid', gap=14}}>
+                      {openOrders.map(o => (
+                        <div key={o.id} className="panel">
+                          <div className="panel-title">
+                            <div className="accent-bar />
+                            {projLabel(o.projectId)}
+                            <small>ORDER_{o.id}</small>
+                          </div>
+                          <p style={{color='var(--text-dim)', fontSize=12, margin='6px 0 10px'}}>{projMeta(o.projectId)}</p>
+                          <div style={{display='flex', gap=8, alignItems='center', flexWrap='wrap'}}>
+                            {orderStatusTag(o.status)}
+                            <button onClick={=> setBidFor(bidFor === o.id ? null : o.id)} className="btn btn-primary" style={{fontSize=12, padding='4px 14px'}}>
+                              {bidFor === o.id ? 'Cancel' : 'Place Bid'}
+                            </button>
+                          </div>
+                          {bidFor === o.id && (
+                            <div style={{marginTop=12, padding=12, borderRadius=10, background='rgba(0,229,255,0.06)', border='1px solid rgba(0,229,255,0.18)'}}>
+                              <div className="form-group">
+                                <label>Amount (CNY)</label>
+                                <input className="form-input" value={bidAmount} onChange={=> setBidAmount(e.target.value)} placeholder="e.g. 85000" />
+                              </div>
+                              <div className="form-group">
+                                <label>Weeks</label>
+                                <input className="form-input" value={bidWeeks} onChange={=> setBidWeeks(e.target.value)} placeholder="e.g. 6" />
+                              </div>
+                              <div className="form-group">
+                                <label>Note</label>
+                                <input className="form-input" value={bidNote} onChange={=> setBidNote(e.target.value)} placeholder="Optional" />
+                              </div>
+                              <button onClick={=> submitBid(o.id)} disabled={busy || !bidAmount.trim() || !bidWeeks.trim()} className="btn btn-primary" style={{fontSize=12}}>
+                                {busy ? 'Submitting...' : 'Submit Bid'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )})
+                    </div>
+                  )}
+                </>
+
+              {tab === 'bids' && (
+                <>
+                  {myBids.length == 0 ? (
+                    <div className="panel empty-state"><p>No bids yet</p></div>
+                  ) : (
+                    <table className="data-table">
+                      <thead>
+                        <tr><th>Project</th><th>Amount</th><th>Weeks</th><th>Status</th><th>Date</th></tr>
+                      </thead>
+                      <tbody>
+                        {myBids.map(b => (
+                          <tr key={b.id}>
+                            <td>{b.projectName}</td>
+                            <td>{b.amount}</td>
+                            <td>{b.weeks}</td>
+                            <td>{bidStatusTag(b.status)}</td>
+                            <td style={{fontSize=11, color='var(--text-dim)'}}>{b.createdAt ? b.createdAt.slice(0, 10) : '-'}</td>
+                          </tr>
+                        )})
+                      </tbody>
+                    </table>
+                  )}
+                </>
+
+              {tab === 'orders' && (
+                <>
+                  {myOrders.length == 0 ? (
+                    <div className="panel empty-state"><p>No orders yet</p></div>
+                  ) : (
+                    <div style={{display='grid', gap=14}}>
+                      {myOrders.map(o => (
+                        <div key={o.id} className="panel">
+                          <div className="panel-title">
+                            <div className="accent-bar />
+                            {projLabel(o.projectId)}
+                            <small>ORDER_{o.id}</small>
+                          </div>
+                          <p style={{color='var(--text-dim)', fontSize=12, margin='6px 0 10px'}}>{projMeta(o.projectId)}</p>
+                          <div style={{display='flex', gap=8, alignItems='center', flexWrap='wrap'}}>
+                            {orderStatusTag(o.status)}
+                            {o.bidAmount && <span className="tag tag-cyan">{o.bidAmount}</span>}
+                            {o.bidWeeks && <span className="tag tag-purple">{o.bidWeeks}w</span>}
+                          </div>
+                          <div style={{display='flex', gap=8, marginTop=12, flexWrap='wrap'}}>
+                            {(o.status === 'matched' || o.status === 'homeowner_confirmed') && (
+                              <button onClick={=> confirmOrder(o.id)} disabled={busy} className="btn btn-primary" style={{fontSize=12, padding='4px 14px'}}>
+                                Confirm Order
+                              </button>
+                            )
+                            {o.status === 'confirmed' && (
+                              <button onClick={=> viewContract(o.id)} disabled={busy} className="btn btn-primary" style={{fontSize=12, padding='4px 14px'}}>
+                                View Contract
+                              </button>
+                            )
+                          </div>
+                        </div>
+                      )})
+                    </div>
+                  )}
+                </>
+            </>
+          )}
+        </>
+      )}
