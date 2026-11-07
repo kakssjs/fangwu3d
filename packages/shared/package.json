@@ -43,6 +43,10 @@
     "./fair-bidding": {
       "types": "./src/fair-bidding.ts",
       "default": "./src/fair-bidding.ts"
+    },
+    "./marketplace": {
+      "types": "./src/marketplace.ts",
+      "default": "./src/marketplace.ts"
     }
   }
 }

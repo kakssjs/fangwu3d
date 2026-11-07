@@ -43,5 +43,6 @@ npm run dev:worker                # Agent Worker（需本地 Redis）
 
 - [ ] 生产切换阿里云 RDS（现为 PGlite，切换只改 `db.ts` 一行）
 - [ ] OSS 上传（MiMo 视觉识别已接入户型识别链路，QA 质检已实现）
-- [x] 装修队入驻费、规模分级、会员套餐和客户资源匹配（详见 `MEMBERSHIP.md`）`r`n- [x] 3D 模型模块：户型同源重建、自动家具摆放、门窗/玻璃、材质库、自动漫游、GLB/Blender Cycles/Pascal Editor 导出（详见 `3D-MODULE.md`）
+- [x] 装修队入驻费、规模分级、会员套餐和客户资源匹配（详见 `MEMBERSHIP.md`）`r`n- [x] 家具与智能家居商城：小米官方产品目录、分类搜索、选购清单与官方购买入口（详见 `MARKETPLACE.md`）`r`n- [x] 3D 模型模块：户型同源重建、自动家具摆放、门窗/玻璃、材质库、自动漫游、GLB/Blender Cycles/Pascal Editor 导出（详见 `3D-MODULE.md`）
+
 

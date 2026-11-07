@@ -79,3 +79,4 @@ export * from './furniture';
 export * from './membership';
 export * from './commission';
 export * from './fair-bidding';
+export * from './marketplace';
