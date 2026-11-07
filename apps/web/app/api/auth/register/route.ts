@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createMembershipPayment, createUser, getUserByPhone, setUserPasswordHash } from '@i-renovation/shared';
+import { createMembershipPayment, createUser, getUserByPhone, getUserByVerifiedEmail, setUserPasswordHash, setUserVerifiedEmail } from '@i-renovation/shared';
 import { MIN_PASSWORD, checkBossLogin, hashPassword, setSessionCookie } from '@/lib/auth';
+import { consumeCode, emailEnabled, normalizeEmail } from '@/lib/email';
 import { billingPeriodMonths, getMembershipTier, membershipFeeFor, recommendedTierForScale, type ContractorScale, type MembershipBillingCycle } from '@i-renovation/shared/membership';
 
 type RegisterBody = {
@@ -8,6 +9,8 @@ type RegisterBody = {
   name?: string;
   phone?: string;
   email?: string;
+  /** 邮箱验证码（开启邮箱验证时必填） */
+  emailCode?: string;
   password?: string;
   companyName?: string;
   license?: string;
@@ -47,24 +50,45 @@ export async function POST(req: Request) {
 
     // 防止重复注册：同一手机号只能注册一次
     const existing = await getUserByPhone(phone);
-    if (existing) {
-      // 旧版本创建的、从来没有设过密码的账号：允许用同一手机号和同一身份设置密码并登录，否则这些用户永远进不来。
-      // 已经有密码的账号不能这样认领。（目前没有短信验证，没法确认手机号归谁，这是权衡，见 AUTH.md）
-      if (!existing.passwordHash && existing.role === role) {
-        await setUserPasswordHash(existing.id, passwordHash);
-        const res = NextResponse.json({ id: existing.id, role: existing.role, claimed: true });
-        setSessionCookie(res, existing.id, role);
-        return res;
-      }
+    // 旧版本创建的、从来没有设过密码的账号：允许用同一手机号和同一身份设置密码并登录，否则这些用户永远进不来。
+    // 已经有密码的账号不能这样认领。（见 AUTH.md）
+    const claimable = !!existing && !existing.passwordHash && existing.role === role;
+    if (existing && !claimable) {
       return NextResponse.json({ error: '该手机号已注册，请直接登录' }, { status: 409 });
     }
+
+    // 开启邮箱验证后：注册必须用验证码确认邮箱。放在手机号检查之后，手机号重复时不会白白用掉验证码
+    let verifiedEmail: string | undefined;
+    if (emailEnabled()) {
+      const normalized = normalizeEmail(body.email);
+      if (!normalized) return NextResponse.json({ error: '请填写有效的邮箱' }, { status: 400 });
+      const owner = await getUserByVerifiedEmail(normalized);
+      if (owner && owner.id !== existing?.id) {
+        return NextResponse.json({ error: '该邮箱已注册，请直接用邮箱验证码登录' }, { status: 409 });
+      }
+      if (!(await consumeCode(normalized, body.emailCode, 'register'))) {
+        return NextResponse.json({ error: '邮箱验证码错误或已过期，请重新获取' }, { status: 400 });
+      }
+      verifiedEmail = normalized;
+    }
+
+    if (existing && claimable) {
+      await setUserPasswordHash(existing.id, passwordHash);
+      if (verifiedEmail) await setUserVerifiedEmail(existing.id, verifiedEmail);
+      const res = NextResponse.json({ id: existing.id, role: existing.role, claimed: true });
+      setSessionCookie(res, existing.id, role);
+      return res;
+    }
+    const emailFields = verifiedEmail
+      ? { email: verifiedEmail, emailVerifiedAt: new Date().toISOString() }
+      : { email };
 
     if (role === 'homeowner') {
       const user = await createUser({
         role: 'homeowner',
         name,
         phone,
-        email,
+        ...emailFields,
         passwordHash,
       });
       const res = NextResponse.json({ id: user.id, role: user.role });
@@ -83,7 +107,7 @@ export async function POST(req: Request) {
       role: 'company',
       name,
       phone,
-      email,
+      ...emailFields,
       passwordHash,
       companyName,
       license: body.license?.trim() || undefined,

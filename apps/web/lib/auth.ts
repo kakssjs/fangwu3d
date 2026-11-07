@@ -81,6 +81,11 @@ function sign(payload: string): string {
   return crypto.createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
+/** 用会话密钥做的带密钥摘要（存邮箱验证码、限额键时用，数据库泄露也反推不出验证码）。 */
+export function keyedHash(text: string): string {
+  return crypto.createHmac('sha256', secret()).update(`email-code\0${text}`).digest('hex');
+}
+
 export function setSessionCookie(res: NextResponse, uid: number, role: Role): void {
   const session: Session = { uid, role, exp: Math.floor(Date.now() / 1000) + MAX_AGE_S };
   const payload = Buffer.from(JSON.stringify(session)).toString('base64url');

@@ -3,7 +3,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { pgTable, serial, text, integer, jsonb } from 'drizzle-orm/pg-core';
-import { eq, asc, and, inArray } from 'drizzle-orm';
+import { eq, asc, and, inArray, isNotNull, lte } from 'drizzle-orm';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -72,8 +72,25 @@ export const users = pgTable('users', {
   monthlyLeadsUsed: integer('monthly_leads_used').default(0),
   membershipPaidAmount: integer('membership_paid_amount').default(0),
   membershipStartedAt: text('membership_started_at'),
+  /** 邮箱经验证码确认的时间；为空表示 email 只是填写的，没验证过，不能用来登录 */
+  emailVerifiedAt: text('email_verified_at'),
   verified: integer('verified').notNull().default(0),
   createdAt: text('created_at').notNull(),
+});
+
+/** 待使用的邮箱验证码：只存 HMAC 摘要，不存明文；key = 用途:邮箱 */
+export const emailCodes = pgTable('email_codes', {
+  key: text('key').primaryKey(),
+  codeHash: text('code_hash').notNull(),
+  expiresAt: integer('expires_at').notNull(),   // Unix 秒
+  attempts: integer('attempts').notNull().default(0),
+});
+
+/** 发信限额计数：key = 范围:对象:时间窗，到 expiresAt 为止 */
+export const emailQuotas = pgTable('email_quotas', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  expiresAt: integer('expires_at').notNull(),   // Unix 秒
 });
 
 export const orders = pgTable('orders', {
@@ -186,6 +203,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_lead_quota integer DEFAULT 30
 ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_leads_used integer DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_paid_amount integer DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_started_at text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at text;
+CREATE TABLE IF NOT EXISTS email_codes (
+  key text PRIMARY KEY, code_hash text NOT NULL, expires_at integer NOT NULL, attempts integer NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS email_quotas (
+  key text PRIMARY KEY, count integer NOT NULL, expires_at integer NOT NULL
+);
 CREATE TABLE IF NOT EXISTS orders (
   id serial PRIMARY KEY, project_id integer NOT NULL, homeowner_id integer NOT NULL,
   company_id integer, status text NOT NULL DEFAULT 'open',
@@ -208,8 +232,6 @@ CREATE TABLE IF NOT EXISTS commission_settlements (
   platform_commission_cny integer NOT NULL, contractor_net_profit_cny integer NOT NULL,
   status text NOT NULL DEFAULT 'pending', created_at text NOT NULL, settled_at text
 );
-ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
-ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS estimated_cost_cny integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS profit_cny integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS platform_commission_cny integer DEFAULT 0;
@@ -224,6 +246,9 @@ CREATE TABLE IF NOT EXISTS membership_payments (
   amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
   payment_reference text, created_at text NOT NULL, paid_at text
 );
+-- 旧库补列：必须在建表之后（放在前面时，全新数据库在这里报错，后面的表都建不出来）
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;
 CREATE TABLE IF NOT EXISTS contracts (
   id serial PRIMARY KEY, order_id integer NOT NULL, content text NOT NULL,
   homeowner_signed integer NOT NULL DEFAULT 0, company_signed integer NOT NULL DEFAULT 0,
@@ -378,10 +403,69 @@ export async function createUser(u: {
   companyName?: string; license?: string; qualifications?: unknown;
   districts?: unknown; serviceTypes?: unknown; specialties?: unknown;
   companyScale?: string; membershipTier?: string; membershipStatus?: string; monthlyLeadQuota?: number;
+  emailVerifiedAt?: string;
 }) {
   const db = await getDb();
   const [row] = await db.insert(users).values({ ...u, verified: 0, createdAt: now() }).returning();
   return row;
+}
+
+/** 记下已验证的邮箱（认领旧账号时用） */
+export async function setUserVerifiedEmail(id: number, email: string) {
+  const db = await getDb();
+  await db.update(users).set({ email, emailVerifiedAt: now() }).where(eq(users.id, id));
+}
+
+/** 按「已验证」的邮箱找账号（邮箱统一小写）。只填写、没验证过的邮箱找不到。 */
+export async function getUserByVerifiedEmail(email: string) {
+  const db = await getDb();
+  const [row] = await db.select().from(users).where(and(eq(users.email, email), isNotNull(users.emailVerifiedAt)));
+  return row ?? null;
+}
+
+// ---- 邮箱验证码 ----
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** 占用一次发信额度；超过 limit 返回 false。窗口到期后从 1 重新计。 */
+export async function takeEmailQuota(key: string, periodSec: number, limit: number): Promise<boolean> {
+  const db = await getDb();
+  const t = nowSec();
+  const [row] = await db.select().from(emailQuotas).where(eq(emailQuotas.key, key));
+  if (!row || row.expiresAt <= t) {
+    await db.insert(emailQuotas).values({ key, count: 1, expiresAt: t + periodSec })
+      .onConflictDoUpdate({ target: emailQuotas.key, set: { count: 1, expiresAt: t + periodSec } });
+    return true;
+  }
+  if (row.count >= limit) return false;
+  await db.update(emailQuotas).set({ count: row.count + 1 }).where(eq(emailQuotas.key, key));
+  return true;
+}
+
+/** 保存（或替换）某个用途和邮箱的验证码摘要，重置错误次数。顺带清掉过期的码和额度。 */
+export async function saveEmailCode(key: string, codeHash: string, ttlSec: number) {
+  const db = await getDb();
+  const t = nowSec();
+  await db.delete(emailCodes).where(lte(emailCodes.expiresAt, t));
+  await db.delete(emailQuotas).where(lte(emailQuotas.expiresAt, t));
+  await db.insert(emailCodes).values({ key, codeHash, expiresAt: t + ttlSec, attempts: 0 })
+    .onConflictDoUpdate({ target: emailCodes.key, set: { codeHash, expiresAt: t + ttlSec, attempts: 0 } });
+}
+
+export async function getEmailCode(key: string) {
+  const db = await getDb();
+  const [row] = await db.select().from(emailCodes).where(eq(emailCodes.key, key));
+  return row && row.expiresAt > nowSec() ? row : null;
+}
+
+export async function countEmailCodeAttempt(key: string, attempts: number) {
+  const db = await getDb();
+  await db.update(emailCodes).set({ attempts }).where(eq(emailCodes.key, key));
+}
+
+export async function deleteEmailCode(key: string) {
+  const db = await getDb();
+  await db.delete(emailCodes).where(eq(emailCodes.key, key));
 }
 
 export async function getUser(id: number) {
