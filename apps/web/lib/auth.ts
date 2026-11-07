@@ -92,7 +92,10 @@ export function setSessionCookie(res: NextResponse, uid: number, role: Role): vo
   res.cookies.set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // HTTP 部署时不要强制 Secure Cookie，否则浏览器不会保存登录状态；HTTPS 部署可设置 COOKIE_SECURE=true。
+    secure: process.env.COOKIE_SECURE
+      ? process.env.COOKIE_SECURE === 'true'
+      : process.env.NODE_ENV === 'production' && (process.env.PUBLIC_BASE_URL ?? '').startsWith('https://'),
     path: '/',
     maxAge: MAX_AGE_S,
   });

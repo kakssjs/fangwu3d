@@ -9,17 +9,51 @@ export default function NewProjectForm() {
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setBusy(true); setError('');
+    setBusy(true);
+    setError('');
     const fd = new FormData(e.currentTarget);
     try {
       const u = JSON.parse(localStorage.getItem('user') ?? '{}');
       if (u?.id) fd.set('homeownerId', String(u.id));
-    } catch {}
-    const res = await fetch('/api/projects', { method: 'POST', body: fd });
-    setBusy(false);
-    if (!res.ok) { setError((await res.json()).error ?? '提交失败'); return; }
-    const { id } = await res.json();
-    router.push(`/project/${id}`);
+
+      // 保存前先确认服务端登录状态，避免把 401 误报成网络故障
+      const authRes = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      if (authRes.status === 401) {
+        setError('登录状态已失效，请退出后重新登录，再保存项目。');
+        return;
+      }
+      if (!authRes.ok && authRes.status !== 403) {
+        setError(`服务器暂时不可用（${authRes.status}），请稍后重试。`);
+        return;
+      }
+
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        let message = `保存失败（HTTP ${res.status}）`;
+        try {
+          const data = (await res.json()) as { error?: string };
+          if (data.error) message = data.error;
+        } catch {}
+        if (res.status === 401) message = '登录状态已失效，请重新登录后再保存。';
+        if (res.status === 413) message = '户型图文件太大，请压缩后重试。';
+        setError(message);
+        return;
+      }
+      const { id } = (await res.json()) as { id: number };
+      router.push(`/project/${id}`);
+    } catch (error) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setError('设备当前处于离线状态，请检查手机网络后重试。');
+      } else {
+        setError(`无法连接服务器，请检查网络或稍后重试。${error instanceof Error ? `（${error.message}）` : ''}`);
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -55,7 +89,7 @@ export default function NewProjectForm() {
       <button disabled={busy} className="btn btn-primary" style={{ width: '100%' }}>
         {busy ? '⏳ 提交中…' : '⚡ 生成设计方案'}
       </button>
-      {error && <p style={{ color: 'var(--accent-danger)', fontSize: 13, marginTop: 10 }}>{error}</p>}
+      {error && <p role="alert" aria-live="polite" style={{ color: 'var(--accent-danger)', fontSize: 13, marginTop: 10, lineHeight: 1.6 }}>{error}</p>}
       <p style={{ color: 'var(--text-dim)', fontSize: 11.5, marginTop: 14, lineHeight: 1.7 }}>
         提交后 Agent 流水线逐个执行：户型识别 → 二维设计 → 报价工期 → QA 质检；你确认发布后，装修公司投标，匹配智能体按真实投标匹配
       </p>
