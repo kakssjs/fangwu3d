@@ -172,7 +172,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [fpData, setFpData] = useState<StudioData | null>(null);
   const [customGeom, setCustomGeom] = useState<PlanGeometry | null>(null);
   const [fpSource, setFpSource] = useState<'user' | 'agent'>('user');
-  // 工作台数据 → 下游（Agent 施工图 / 房间渲染图）
+  // 工作台数据 → 下游（空间设计图 / 房间渲染图）
   const [studioRects, setStudioRects] = useState<StudioRect[]>([]);
   const [stdUrl, setStdUrl] = useState<string | null>(null);
   const [genRoomsBusy, setGenRoomsBusy] = useState(false);
@@ -331,7 +331,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       body: JSON.stringify({
         kind: 'decorations',
         upsert: true,
-        content: { images: imgs, style: data?.project.style, note: `根据房型图生成的各房间渲染图（${imgs.length} 间，AI 生成）` },
+        content: { images: imgs, style: data?.project.style, note: `根据房型图生成的空间效果图（${imgs.length} 间）` },
       }),
     });
   }
@@ -431,7 +431,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     return (
       <div className="container" style={{ padding: 80, textAlign: 'center', color: 'var(--text-dim)' }}>
         <div style={{ fontSize: 32, marginBottom: 12, animation: 'ring-pulse 1.5s ease-in-out infinite' }}>⟳</div>
-        <div style={{ fontSize: 15, marginBottom: 8 }}>正在启动智能体流水线…</div>
+        <div style={{ fontSize: 15, marginBottom: 8 }}>正在准备设计方案…</div>
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>INITIALIZING AGENTS...</div>
       </div>
     );
@@ -747,16 +747,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </tbody>
           </table>
           <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
-            AI 识别生成，尺寸以现场量房为准
+            户型识别生成 · 尺寸以现场量房为准
           </p>
         </section>
       )}
 
-      {/* Agent 施工图：标准房型图（上传图 / Agnes 手绘标准化） */}
+      {/* 空间设计图：标准房型图 */}
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <div className="accent-bar" />
-          Agent 施工图
+          空间设计图
           <small>标准房型图 · 与 3D 同源</small>
         </div>
         {(stdUrl || fpData?.stdImage || fpData?.image) ? (
@@ -767,7 +767,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               style={{ width: '100%', maxWidth: 820, borderRadius: 12, border: '1px solid var(--border-strong)', display: 'block' }}
             />
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
-              {(stdUrl || fpData?.stdImage) ? 'AI 生成标准房型图 · 尺寸以现场量房为准' : '上传户型图 · 可在上方工作台一键标准化'}
+              {(stdUrl || fpData?.stdImage) ? '标准房型图 · 尺寸以现场量房为准' : '上传户型图 · 可在上方工作台一键标准化'}
             </p>
           </>
         ) : design?.svg ? (
@@ -777,7 +777,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </>
         ) : (
           <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-            暂无房型图 — 在上方工作台上传图片或手绘框房间，点「Agnes 生成标准平面图」
+            暂无房型图 — 在上方工作台上传图片或手绘框房间，点击「生成标准平面图」
           </p>
         )}
       </section>
@@ -791,7 +791,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0 4px' }}>
           <button className="btn btn-primary" disabled={genRoomsBusy} onClick={() => void generateRoomRenderings()}>
-            {genRoomsBusy ? `渲染图生成中 ${genRoomsProgress}…` : '✦ 生成各房间渲染图'}
+            {genRoomsBusy ? `渲染图生成中 ${genRoomsProgress}…` : '生成空间效果图'}
           </button>
           <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
             基于房型图房间（{(studioRects.length ? studioRects.map(r => r.name) : (plan?.rooms ?? []).map(r => r.name)).join('、') || '识别后可用'}）· 共 {(studioRects.length || (plan?.rooms ?? []).length) || 0} 间，有几个生成几张 · {data.project.style} 风格
@@ -800,7 +800,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         {studioRects.length === 0 && (
           <div className="notice notice-warn" style={{ margin: '8px 0 4px', fontSize: 12 }}>
             还没有户型图：下面的房间和门窗是系统按面积估的，不是真实布局，渲染图只是示意，也不会核对。
-            请在上方工作台上传户型图（或框出房间），点「AI 识别房间」，核对门窗后再生成。
+            请在上方工作台上传户型图（或框出房间），点击「识别房间」，核对门窗后再生成。
           </div>
         )}
         {/* 房间选择 */}
@@ -894,7 +894,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <div style={{ maxHeight: 260, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {chatMessages.length === 0 && (
                 <p style={{ color: 'var(--text-dim)', fontSize: 12, textAlign: 'center', padding: '18px 0' }}>
-                  输入修改意见，AI 将重新生成装饰图。例如："换成蓝色沙发"、"增加绿植"、"改成暖色调灯光"
+                  输入修改意见，重新生成空间效果图。例如："换成蓝色沙发"、"增加绿植"、"改成暖色调灯光"
                 </p>
               )}
               {chatMessages.map((m, i) => (
@@ -914,7 +914,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               ))}
               {chatBusy && (
                 <div style={{ alignSelf: 'flex-start', color: 'var(--text-dim)', fontSize: 12, padding: '4px 0' }}>
-                  <span style={{ animation: 'pulse 1s infinite' }}>⟳ AI 正在生成...</span>
+                  <span style={{ animation: 'pulse 1s infinite' }}>⟳ 正在生成...</span>
                 </div>
               )}
             </div>
@@ -946,14 +946,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <div className="panel-title">
               <div className="accent-bar" />
               3D 设计模型（户型 · 材质 · 家具）
-              <small>{activeSceneModel ? `SCENE MODEL → ${activeSceneModel.materialPreset.name} · GLB / BLENDER / PASCAL` : (useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION')}</small>
+              <small>{activeSceneModel ? `3D 场景 · ${activeSceneModel.materialPreset.name} · 可导出` : (useUser ? '来源：用户户型图' : '户型几何重建')}</small>
             </div>
             {customGeom && plan?.geometry && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <button className={useUser ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '4px 12px' }}
                   onClick={() => setFpSource('user')}>按我的户型图</button>
                 <button className={!useUser ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '4px 12px' }}
-                  onClick={() => setFpSource('agent')}>Agent 自动布局</button>
+                  onClick={() => setFpSource('agent')}>自动布局</button>
               </div>
             )}
             <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>Loading 3D...</div>}>
@@ -969,7 +969,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             />
             {effWarnings.length > 0 && (
               <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>
-                ⚠ ForgeFloor 校验提示：{effWarnings.join('；')}
+                ⚠ 空间校验提示：{effWarnings.join('；')}
               </div>
             )}
           </section>
@@ -1088,7 +1088,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <div className="accent-bar" />
-          智能体执行日志
+          设计执行记录
           <small style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', animation: 'pulse 1.5s infinite' }}>● LIVE</small>
         </div>
         <div style={{ margin: '12px 0 18px', height: 6, borderRadius: 3, background: 'var(--accent-soft)', overflow: 'hidden' }}>
@@ -1154,7 +1154,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         {!match && (
           <div style={{ textAlign: 'center', padding: '18px 0 6px' }}>
             <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1s infinite', marginRight: 8, verticalAlign: 'middle' }} />
-            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>Agent 流水线执行中 — 上方日志实时刷新</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>设计方案生成中 — 上方记录实时更新</span>
           </div>
         )}
       </section>
@@ -1164,7 +1164,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <div className="panel-title">
           <div className="accent-bar" />
           发布 · 竞标 · 匹配
-          <small>MARKETPLACE · 业主确认后发布，装修公司投标后匹配智能体「小桥」自动匹配</small>
+          <small>业主确认后发布，施工方报价后进行综合匹配</small>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '14px 0 6px' }}>
           {[
@@ -1181,7 +1181,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               hint: bids.length > 0 ? `${bids.length} 家已投标` : (order ? '等待装修公司发布投标数据…' : '发布后装修公司可投标'),
             },
             {
-              label: '④ 匹配智能体匹配', ok: matchCount > 0, pending: matcherBusy || (bids.length > 0 && matchCount === 0),
+              label: '④ 综合匹配', ok: matchCount > 0, pending: matcherBusy || (bids.length > 0 && matchCount === 0),
               hint: matchCount > 0 ? `已匹配 ${matchCount} 家` : (matcherBusy ? '小桥匹配中…' : (bids.length > 0 ? '待匹配' : '等待投标数据')),
             },
           ].map((s, i) => (
@@ -1218,15 +1218,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
           {showRecommend && (
             <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--accent2-soft)', border: '1px solid #e4d6bd', fontSize: 12, color: 'var(--text)' }}>
-              <span className="tag tag-purple" style={{ marginRight: 8 }}>AI 推荐</span>
+              <span className="tag tag-purple" style={{ marginRight: 8 }}>优选推荐</span>
               {recommended
                 ? `${recommended.name}（${recommended.score != null ? `匹配度 ${recommended.score}%` : `★${recommended.rating ?? '-'}`}）· 匹配理由：${recommended.reason}`
-                : '暂无 AI 推荐结果'}
+                : '暂无 优选推荐结果'}
             </div>
           )}
           {bids.length === 0 && (
             <p style={{ color: 'var(--text-dim)', fontSize: 12.5, margin: '12px 0 4px' }}>
-              ⏳ 已发布到接单市场，正在等待装修公司发布投标数据…（收到投标后匹配智能体「小桥」自动开始匹配）
+              ⏳ 已发布到接单市场，正在等待装修公司发布投标数据…（收到报价后自动开始综合匹配）
             </p>
           )}
           {bids.length > 0 && <table className="data-table" style={{marginTop:14}}><thead><tr><th>Company</th><th>Amount</th><th>Weeks</th></tr></thead><tbody>{bids.map(b=><tr key={b.id}><td>{b.companyName}</td><td>{b.amount}</td><td>{b.weeks}</td></tr>)}</tbody></table>}
@@ -1310,7 +1310,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       </div>
 
       <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 11, marginTop: 20 }}>
-        由 I Renovation 智能体团队驱动 · 每 2 秒刷新 · 生成结果供参考，最终以签约量房为准
+        予舍 · 住宅设计与装修平台 · 生成结果供参考，最终以签约量房为准
       </p>
     </main>
   );

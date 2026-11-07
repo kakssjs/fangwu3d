@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NewProjectForm from '../components/NewProjectForm';
 
-const AGENT_FLOW = [
-  { icon: '⌂', name: 'FloorPlan', label: '户型识别', note: '读取户型、房间与门窗' },
-  { icon: '◇', name: 'Designer', label: '方案设计', note: '风格、布局与空间关系' },
-  { icon: '◉', name: '3D Studio', label: '3D 建模', note: '家具、材质与漫游' },
-  { icon: '¥', name: 'Quote', label: '报价工期', note: '材料清单与施工排期' },
-  { icon: '✓', name: 'QA', label: '质检交付', note: '布局、图片与报价核验' },
+const DESIGN_FLOW = [
+  { step: '01', label: '空间规划', note: '梳理户型、动线与生活需求' },
+  { step: '02', label: '方案设计', note: '确定风格、尺度与空间关系' },
+  { step: '03', label: '三维呈现', note: '预览家具、材质、灯光与空间' },
+  { step: '04', label: '预算工期', note: '整理材料、费用与施工计划' },
+  { step: '05', label: '交付审核', note: '复核布局、报价和设计完整性' },
 ];
 
 const HOME_IMAGES = [
@@ -89,10 +89,10 @@ export default function HomeownerDashboard() {
     <main className="container" style={{ paddingTop: 24 }}>
       <section className="role-hero" style={{ backgroundImage: `url("${HOME_IMAGES[0]}")` }}>
         <div className="role-hero-content">
-          <span className="role-kicker"><i /> HOMEOWNER STUDIO · {user.name}</span>
-          <h1 className="role-title">把理想家，变成可执行的设计方案</h1>
+          <span className="role-kicker"><i /> 私宅设计中心 · {user.name}</span>
+          <h1 className="role-title">让空间，回到生活本身</h1>
           <p className="role-subtitle">
-            从户型识别到 3D 空间、材质搭配、预算工期和装修队匹配，所有设计决策都在同一个项目空间里完成。
+            从户型规划、空间设计到材质搭配、预算工期与施工落地，每一个决定都清晰、克制、可执行。
           </p>
           <div className="role-actions">
             <a href="#new-project" className="btn btn-primary">创建装修项目</a>
@@ -104,32 +104,32 @@ export default function HomeownerDashboard() {
       <section className="role-stat-grid">
         <div className="role-stat-card"><strong>{projects.length}</strong><span>我的装修项目<br />户型、设计、报价与施工进度</span></div>
         <div className="role-stat-card"><strong>3D</strong><span>沉浸式空间预览<br />家具、材质、漫游与 Blender 导出</span></div>
-        <div className="role-stat-card"><strong>AI × 5</strong><span>设计智能体协作<br />识别、设计、渲染、报价、质检</span></div>
+        <div className="role-stat-card"><strong>全流程</strong><span>从设计到交付<br />规划、呈现、预算、审核</span></div>
       </section>
 
       <section>
-        <div className="section-label"><h2>你的专属设计流水线</h2><div className="line" /><span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>DESIGN PIPELINE</span></div>
+        <div className="section-label"><h2>从构想到落地</h2><div className="line" /><span>完整设计流程</span></div>
         <div className="role-feature-grid">
-          {AGENT_FLOW.map(item => (
-            <div className="role-feature-card" key={item.name}>
-              <b>{item.icon} &nbsp; {item.name}</b>
+          {DESIGN_FLOW.map(item => (
+            <div className="role-feature-card" key={item.step}>
+              <b>{item.step}</b>
               <h3>{item.label}</h3>
               <p>{item.note}</p>
             </div>
           ))}
           <div className="role-feature-card">
-            <b>↗ &nbsp; MATCH</b>
-            <h3>装修队匹配</h3>
-            <p>根据真实报价、工期、资质与风格专长推荐施工团队。</p>
+            <b>06</b>
+            <h3>施工匹配</h3>
+            <p>综合报价、工期、资质与风格专长，找到更适合的施工团队。</p>
           </div>
         </div>
       </section>
 
       <section>
-        <div className="section-label"><h2>我的项目</h2><div className="line" /><span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>MY PROJECTS</span></div>
+        <div className="section-label"><h2>我的项目</h2><div className="line" /><span>我的空间</span></div>
         {projects.length === 0 ? (
           <div className="panel empty-state" style={{ padding: 34 }}>
-            <p>还没有装修项目。创建第一个项目，AI 将生成户型、3D 与全屋设计方案。</p>
+            <p>还没有装修项目。创建第一个项目，系统将生成户型、三维空间与全屋设计方案。</p>
           </div>
         ) : (
           <div className="grid-3">
@@ -138,7 +138,7 @@ export default function HomeownerDashboard() {
                 <a href={'/project/' + p.id} className="role-project-card" style={{ display: 'block', backgroundImage: `url("${HOME_IMAGES[(index % 3) + 1]}")` }}>
                   <div className="role-project-content">
                     <h3>{p.name}</h3>
-                    <p>{p.style} · {p.stage >= 3 ? '发布 · 竞标 · 匹配' : 'AI 设计进行中'}</p>
+                    <p>{p.style} · {p.stage >= 3 ? '施工匹配中' : '方案设计中'}</p>
                   </div>
                 </a>
                 {delId === p.id ? (
@@ -160,16 +160,16 @@ export default function HomeownerDashboard() {
       </section>
 
       <section id="new-project" style={{ marginTop: 38 }}>
-        <div className="section-label"><h2>开始新的设计</h2><div className="line" /><span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>NEW PROJECT</span></div>
+        <div className="section-label"><h2>开始新的设计</h2><div className="line" /><span>空间需求</span></div>
         <div className="role-brief">
           <div className="role-brief-visual" style={{ backgroundImage: `url("${HOME_IMAGES[3]}")` }}>
             <div className="role-brief-copy">
               <h3>先描述你想要的生活</h3>
-              <p>家庭成员、收纳需求、厨房形式、预算与风格偏好，都会成为 AI 设计师的依据。</p>
+              <p>家庭成员、收纳需求、厨房形式、预算与风格偏好，都会成为设计团队的重要依据。</p>
             </div>
           </div>
           <div className="panel" style={{ padding: 26 }}>
-            <div className="panel-title"><div className="accent-bar" />项目需求录入<small>HOME BRIEF · 01</small></div>
+            <div className="panel-title"><div className="accent-bar" />项目需求<small>居住 brief</small></div>
             <NewProjectForm />
           </div>
         </div>

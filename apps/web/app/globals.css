@@ -1228,3 +1228,355 @@ input[type="file"].form-input { padding: 10px; cursor: pointer; }
 @media (max-width: 480px) {
   .market-grid { grid-template-columns: 1fr; }
 }
+
+/* =============================================
+   Premium interior-console refinement
+   Visual direction: editorial architecture platforms
+   (Houzz / Planner 5D / Homestyler / Foyr Neo):
+   quiet warm neutrals, photo-led layouts, thin rules,
+   restrained bronze accents, serif titles, low-chroma UI.
+   ============================================= */
+
+:root {
+  --ink: #252925;
+  --muted: #777a73;
+  --paper: #f2f0eb;
+  --paper-2: #faf8f3;
+  --hairline: #ddd8ce;
+  --forest: #294037;
+  --bronze: #9b805e;
+  --bronze-soft: #eee5d7;
+  --glass: rgba(255, 253, 248, 0.82);
+}
+
+body {
+  background:
+    radial-gradient(circle at 82% 8%, rgba(184, 162, 126, .06), transparent 28%),
+    var(--paper);
+}
+
+.container {
+  max-width: 1280px;
+  padding-left: 34px;
+  padding-right: 34px;
+}
+
+.panel {
+  border-radius: 18px;
+  border-color: var(--hairline);
+  box-shadow: 0 18px 52px rgba(51, 47, 39, 0.045);
+}
+
+.panel-title {
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.panel-title .accent-bar {
+  width: 18px;
+  height: 1px;
+  background: var(--bronze);
+}
+
+.panel-title small,
+.section-label > span,
+.market-eyebrow {
+  font-family: inherit;
+  letter-spacing: .08em;
+  color: var(--bronze);
+}
+
+.section-label {
+  margin-top: 52px;
+  margin-bottom: 22px;
+}
+
+.section-label h2 {
+  font-size: clamp(25px, 2.2vw, 34px);
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.section-label .line {
+  background: linear-gradient(90deg, var(--hairline), transparent);
+}
+
+.tag {
+  border-radius: 999px;
+  border-color: var(--hairline);
+  background: rgba(255,255,255,.58);
+  color: var(--muted);
+  letter-spacing: .02em;
+  font-weight: 500;
+}
+
+.tag-green { background: #e8eee9; color: #3f6350; border-color: #cad8cf; }
+.tag-cyan { background: #e9efed; color: #456960; border-color: #d1ded9; }
+.tag-purple { background: var(--bronze-soft); color: #725c40; border-color: #ded0bb; }
+.tag-orange { background: #f2e7da; color: #815f3f; border-color: #e2cfbb; }
+
+.btn {
+  border-radius: 12px;
+  letter-spacing: .01em;
+  font-weight: 560;
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: #fffdf8;
+}
+
+.btn-primary:hover {
+  background: #1f332b;
+  border-color: #1f332b;
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: rgba(255,255,255,.46);
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+
+.btn-ghost:hover {
+  border-color: var(--bronze);
+  color: var(--forest);
+}
+
+.stat-card,
+.role-stat-card {
+  border-radius: 16px;
+  border-color: var(--hairline);
+  background: rgba(255,253,248,.72);
+  box-shadow: 0 14px 38px rgba(51,47,39,.035);
+}
+
+.stat-card .label,
+.role-stat-card span {
+  letter-spacing: .055em;
+  text-transform: none;
+  color: var(--muted);
+}
+
+.stat-card .value,
+.role-stat-card strong {
+  font-family: var(--font-serif);
+  letter-spacing: -.035em;
+  color: var(--ink);
+}
+
+.role-hero,
+.market-hero {
+  min-height: 350px;
+  border-radius: 26px;
+  box-shadow: 0 28px 80px rgba(35, 42, 37, .12);
+}
+
+.role-hero::after {
+  background:
+    linear-gradient(90deg, rgba(18, 28, 23, .92) 0%, rgba(18, 28, 23, .67) 42%, rgba(18, 28, 23, .12) 78%),
+    linear-gradient(0deg, rgba(18,28,23,.32), transparent 58%);
+}
+
+.role-hero-content {
+  padding: 44px 48px;
+}
+
+.role-kicker {
+  border-radius: 0;
+  border-width: 0 0 1px 0;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 0 0 8px;
+  color: rgba(255,255,255,.72);
+  letter-spacing: .16em;
+}
+
+.role-kicker i {
+  width: 18px;
+  height: 1px;
+  border-radius: 0;
+  background: var(--gold);
+  box-shadow: none;
+}
+
+.role-title {
+  max-width: 700px;
+  font-size: clamp(42px, 5vw, 68px);
+  letter-spacing: -.045em;
+  line-height: 1.02;
+}
+
+.role-subtitle {
+  font-size: 15px;
+  line-height: 1.9;
+  color: rgba(255,255,255,.76);
+}
+
+.role-feature-card {
+  min-height: 190px;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.86), rgba(245,241,233,.62));
+  border-color: var(--hairline);
+}
+
+.role-feature-card::before {
+  width: 150px;
+  height: 150px;
+  background: rgba(155,128,94,.08);
+  filter: none;
+}
+
+.role-feature-card b {
+  color: var(--bronze);
+  letter-spacing: .12em;
+}
+
+.role-feature-card h3 {
+  font-size: 25px;
+  letter-spacing: -.025em;
+}
+
+.role-feature-card p {
+  color: var(--muted);
+  line-height: 1.85;
+}
+
+.role-project-card {
+  min-height: 285px;
+  border-radius: 20px;
+  box-shadow: 0 18px 48px rgba(37,42,37,.10);
+}
+
+.role-project-content {
+  padding: 28px;
+}
+
+.role-project-content h3 {
+  font-size: 28px;
+  letter-spacing: -.025em;
+}
+
+.role-tabs {
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.48);
+}
+
+.role-tab {
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+  border-radius: 11px !important;
+  font-weight: 540;
+}
+
+.role-tab.active {
+  box-shadow: 0 10px 26px rgba(41,64,55,.14) !important;
+}
+
+.pipeline {
+  padding: 22px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: rgba(255,253,248,.56);
+}
+
+.pipeline-node::after {
+  top: 28px;
+  background: linear-gradient(90deg, var(--hairline), rgba(221,216,206,.12));
+}
+
+.pipeline-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 15px;
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--bronze);
+  background: var(--paper-2);
+}
+
+.action-card {
+  border-radius: 17px;
+  background: rgba(255,253,248,.72);
+  border-color: var(--hairline);
+}
+
+.action-card:hover {
+  border-color: var(--bronze);
+  box-shadow: 0 18px 44px rgba(41,64,55,.08);
+  transform: translateY(-3px);
+}
+
+.data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.data-table th {
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: .045em;
+  font-weight: 540;
+  background: #f6f3ed;
+}
+
+.data-table td {
+  border-top-color: #ebe6dc;
+  font-size: 12.5px;
+}
+
+.contractor-card {
+  border-radius: 17px;
+  border-color: var(--hairline);
+  background: rgba(255,253,248,.76);
+  box-shadow: 0 16px 42px rgba(40,50,43,.055);
+}
+
+.notice {
+  border-radius: 14px;
+  line-height: 1.8;
+}
+
+.form-input {
+  border-radius: 11px;
+  border-color: var(--hairline);
+  background: rgba(255,255,255,.72);
+}
+
+.form-input:focus {
+  border-color: var(--bronze);
+  box-shadow: 0 0 0 3px rgba(155,128,94,.10);
+}
+
+.market-card {
+  border-radius: 19px;
+  background: rgba(255,253,248,.78);
+}
+
+.market-image {
+  background: linear-gradient(145deg, #f2eee6, #e6e0d5);
+}
+
+@media (max-width: 760px) {
+  .container {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .role-hero-content {
+    padding: 30px 24px;
+  }
+
+  .role-title {
+    font-size: 40px;
+  }
+
+  .section-label {
+    margin-top: 38px;
+  }
+}

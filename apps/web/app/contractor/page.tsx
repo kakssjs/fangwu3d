@@ -395,10 +395,10 @@ export default function ContractorPortal() {
         }}
       >
         <div className="role-hero-content">
-          <span className="role-kicker"><i /> CONTRACTOR NETWORK · {user?.companyName ?? user?.name ?? '装潢公司'}</span>
-          <h1 className="role-title">把好项目，交给真正能落地的团队</h1>
+          <span className="role-kicker"><i /> 工程合作中心 · {user?.companyName ?? user?.name ?? '装潢公司'}</span>
+          <h1 className="role-title">以专业能力，获得长期项目</h1>
           <p className="role-subtitle">
-            浏览真实装修需求，提交报价与工期，管理竞价、订单和施工合同。平台只展示脱敏项目信息，最终合作由业主决定。
+            发现真实装修需求，提交清晰报价与工期，统一管理项目、订单和施工合同。平台关注交付质量，也尊重每一支施工团队的专业价值。
           </p>
           <div className="role-actions">
             <button
@@ -476,17 +476,17 @@ export default function ContractorPortal() {
 
           <div className="role-feature-grid">
             <div className="role-feature-card">
-              <b>01 · BID</b>
-              <h3>精准报价</h3>
+              <b>01</b>
+              <h3>清晰报价</h3>
               <p>根据项目面积、风格、预算和工期要求，提交更有竞争力的施工方案。</p>
             </div>
             <div className="role-feature-card">
-              <b>02 · DELIVERY</b>
-              <h3>订单交付</h3>
+              <b>02</b>
+              <h3>项目交付</h3>
               <p>统一管理匹配、双方确认、合同签署与订单状态，减少沟通遗漏。</p>
             </div>
             <div className="role-feature-card">
-              <b>03 · TRUST</b>
+              <b>03</b>
               <h3>资质与口碑</h3>
               <p>资质由平台人工审核，匹配结果结合真实投标和公司服务能力。</p>
             </div>

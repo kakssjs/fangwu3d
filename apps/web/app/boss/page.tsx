@@ -141,16 +141,16 @@ export default function BossConsole() {
   return (
     <main className="container" style={{ paddingTop: 32 }}>
       <div className="section-label" style={{ marginTop: 0 }}>
-        <h2>老板控制台 · 决策中心</h2>
+        <h2>经营与交付中心</h2>
         <div className="line" />
         <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-          BOSS CONSOLE · LIVE
+          经营概览
         </span>
       </div>
 
       <div className="stats-row" style={{ marginTop: 20, marginBottom: 20 }}>
         <div className="stat-card">
-          <div className="label">待审批</div>
+          <div className="label">待处理</div>
           <div className="value orange">{data?.approvals.length ?? '-'}</div>
         </div>
         <div className="stat-card">
@@ -158,23 +158,23 @@ export default function BossConsole() {
           <div className="value cyan">{data?.projects.length ?? '-'}</div>
         </div>
         <div className="stat-card">
-          <div className="label">Token 消耗</div>
+          <div className="label">模型调用成本</div>
           <div className="value purple">{(costs?.totalTokens ?? 0).toLocaleString()}</div>
         </div>
         <div className="stat-card">
-          <div className="label">图像生成</div>
+          <div className="label">视觉方案</div>
           <div className="value green">{costs?.imageCount ?? '-'}</div>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {([
-          { key: 'approvals', label: '审批队列' },
-          { key: 'tasks', label: '任务记录' },
-          { key: 'costs', label: '成本看板' },
+          { key: 'approvals', label: '待处理事项' },
+          { key: 'tasks', label: '执行进度' },
+          { key: 'costs', label: '成本概览' },
           { key: 'orders', label: '订单（第一单）' },
-          { key: 'membership', label: '入驻费 / 会员' },
-          { key: 'commissions', label: '利润分成' },
+          { key: 'membership', label: '会员与入驻' },
+          { key: 'commissions', label: '商业结算' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -191,11 +191,11 @@ export default function BossConsole() {
       {tab === 'approvals' && (
         <>
           <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 16 }}>
-            ★ 红线：Agent 不碰钱、不签合同、不认证资质、不承诺安全 —— 以下决策必须由老板人工确认
+            付款、合同、资质认证与安全承诺均由负责人确认，以下事项需要人工处理
           </p>
           {(data?.approvals ?? []).length === 0 && (
             <div className="panel" style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
-              暂无待审批事项 — 所有 Agent 任务正常流转
+              暂无待处理事项
             </div>
           )}
           {(data?.approvals ?? []).map(item => (
@@ -293,7 +293,7 @@ export default function BossConsole() {
           <div className="panel">
             <div className="panel-title">
               <div className="accent-bar" />
-              Token 消耗 · 按 Agent
+              模型调用成本 · 按执行环节
               <small>单位经济核算（方案 §3.3）</small>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
@@ -431,7 +431,7 @@ export default function BossConsole() {
       )}
 
       <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 11, marginTop: 24 }}>
-        老板控制台 · 每 3 秒刷新 · 所有任务交接与成本入账可追溯（Task Record）
+        经营数据实时更新 · 所有执行过程、成本与结算记录可追溯
       </p>
     </main>
   );
