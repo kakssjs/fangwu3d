@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createMembershipPayment, createUser, getUserByPhone } from '@i-renovation/shared';
+import { createMembershipPayment, createUser, getUserByPhone, setUserPasswordHash } from '@i-renovation/shared';
 import { MIN_PASSWORD, checkBossLogin, hashPassword, setSessionCookie } from '@/lib/auth';
 import { billingPeriodMonths, getMembershipTier, membershipFeeFor, recommendedTierForScale, type ContractorScale, type MembershipBillingCycle } from '@i-renovation/shared/membership';
 
@@ -48,6 +48,14 @@ export async function POST(req: Request) {
     // 防止重复注册：同一手机号只能注册一次
     const existing = await getUserByPhone(phone);
     if (existing) {
+      // 旧版本创建的、从来没有设过密码的账号：允许用同一手机号和同一身份设置密码并登录，否则这些用户永远进不来。
+      // 已经有密码的账号不能这样认领。（目前没有短信验证，没法确认手机号归谁，这是权衡，见 AUTH.md）
+      if (!existing.passwordHash && existing.role === role) {
+        await setUserPasswordHash(existing.id, passwordHash);
+        const res = NextResponse.json({ id: existing.id, role: existing.role, claimed: true });
+        setSessionCookie(res, existing.id, role);
+        return res;
+      }
       return NextResponse.json({ error: '该手机号已注册，请直接登录' }, { status: 409 });
     }
 

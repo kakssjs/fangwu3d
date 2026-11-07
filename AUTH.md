@@ -93,6 +93,19 @@ BOSS_PASSWORD=    at least 8 characters
 On a real server set all three as environment variables, with a different secret. Changing
 `SESSION_SECRET` signs everyone out.
 
+### If `SESSION_SECRET` is not set
+
+`.env.local` is git-ignored, so a copy of the site on another machine does not have it. Originally that
+made **every sign-in return 500 and every sign-up fail** ("登录失败" / "注册失败"), and a sign-up created
+the account and then failed to start the session. Reproduced and fixed: if `SESSION_SECRET` is missing
+(or shorter than 32 characters), the site generates a random one on first use and keeps it in
+`apps/web/.session-secret` (git-ignored, so restarts don't sign people out; it logs a warning). If the
+file can't be written (read-only host), the secret lives only in memory and everyone has to sign in
+again after a restart. For a real deployment, still set `SESSION_SECRET` in the environment; the file
+is a safety net, and deleting it signs everyone out. Tested with no secret configured: sign-up, sign-in,
+wrong password, and a session surviving a restart. Accounts left half-created by the broken sign-up
+work normally now.
+
 ## 6. Verification
 
 - **Type check:** `npx tsc -b` passes. **Production build:** `next build` passes (19 routes).
@@ -112,9 +125,16 @@ On a real server set all three as environment variables, with a different secret
 
 ## 7. Known limits
 
-- **Accounts created before this change without a password can't sign in.** That includes the
-  earlier test homeowner. They need to register again. There is no password reset, and no boss
-  tool to set one.
+- **Old accounts with no password** (made before passwords were required; the registration form
+  used to make the password optional). They used to be locked out: login said "wrong password" and
+  registering said "already registered". Now the login says the account has no password yet, and
+  registering again with **the same phone number and the same account type** sets a password and signs
+  the person in (`claimed: true`). The wrong account type, or an account that already has a password,
+  is still refused. **Trade-off:** there is no SMS check, so anyone who knows the phone number of a
+  still-password-less account can claim it before its owner does. Those accounts had no protection
+  at all before, and only the first claim works; an SMS code is the real fix. Old accounts that
+  do have a password (including plain-text ones) are not affected and still sign in as before.
+  There is still no password reset for accounts that have a password.
 - **No limit on login attempts.** Passwords are hashed, but nothing slows down guessing. Add rate
   limiting before a public launch.
 - **No SMS or email check.** Anyone can register any phone number; a verification code needs a

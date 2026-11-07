@@ -1,6 +1,8 @@
 // 登录与权限：密码哈希（Node 内置 scrypt）+ 签名会话 Cookie + 各 API 的身份/归属校验。
 // 服务端只相信 Cookie 里签名过的身份，不再相信页面传来的 homeownerId / companyId / role。
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { getOrder, getOrderByProject, getProject, getUser, listBidsByOrder } from '@i-renovation/shared';
 
@@ -50,10 +52,29 @@ export function checkBossLogin(phone: string, password: string): boolean | null 
 
 // ---------- 会话 Cookie ----------
 
+let cachedSecret: string | null = null;
+
+/**
+ * 会话签名密钥：优先用环境变量 SESSION_SECRET（至少 32 个字符）。
+ * 没配置也不能让所有人登录不了：第一次用到时随机生成一个，存进 apps/web/.session-secret（git 忽略），
+ * 之后一直用它，重启不会让大家掉线。写不了文件（只读环境）就只在内存里用，重启后需要重新登录。
+ * 正式上线仍应配置 SESSION_SECRET。
+ */
 function secret(): string {
-  const s = process.env.SESSION_SECRET ?? '';
-  if (s.length < 32) throw new Error('SESSION_SECRET 未配置（至少 32 个字符，见 .env.example）');
-  return s;
+  if (cachedSecret) return cachedSecret;
+  const fromEnv = process.env.SESSION_SECRET ?? '';
+  if (fromEnv.length >= 32) return (cachedSecret = fromEnv);
+  const file = path.join(process.cwd(), '.session-secret');
+  try {
+    const saved = fs.readFileSync(file, 'utf8').trim();
+    if (saved.length >= 32) return (cachedSecret = saved);
+  } catch { /* 还没有 */ }
+  const fresh = crypto.randomBytes(48).toString('base64url');
+  try {
+    fs.writeFileSync(file, fresh, { mode: 0o600 });
+  } catch { /* 写不了：只在内存里用 */ }
+  console.warn('[auth] SESSION_SECRET 未配置，已自动生成并保存到 apps/web/.session-secret。正式上线请在环境变量里配置 SESSION_SECRET。');
+  return (cachedSecret = fresh);
 }
 
 function sign(payload: string): string {
