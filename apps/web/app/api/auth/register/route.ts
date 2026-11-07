@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createUser, getUserByPhone } from '@i-renovation/shared';
+import { createMembershipPayment, createUser, getUserByPhone } from '@i-renovation/shared';
 import { MIN_PASSWORD, checkBossLogin, hashPassword, setSessionCookie } from '@/lib/auth';
-import { getMembershipTier, recommendedTierForScale, type ContractorScale } from '@i-renovation/shared/membership';
+import { billingPeriodMonths, getMembershipTier, membershipFeeFor, recommendedTierForScale, type ContractorScale, type MembershipBillingCycle } from '@i-renovation/shared/membership';
 
 type RegisterBody = {
   role?: string;
@@ -17,6 +17,7 @@ type RegisterBody = {
   specialties?: string[];
   companyScale?: string;
   membershipTier?: string;
+  billingCycle?: string;
 };
 
 export async function POST(req: Request) {
@@ -69,6 +70,7 @@ export async function POST(req: Request) {
 
     const companyScale = (body.companyScale ?? 'small') as ContractorScale;
     const membershipTier = getMembershipTier(body.membershipTier ?? recommendedTierForScale(companyScale).id);
+    const billingCycle = (body.billingCycle ?? 'annual') as MembershipBillingCycle;
     const user = await createUser({
       role: 'company',
       name,
@@ -86,6 +88,14 @@ export async function POST(req: Request) {
       membershipStatus: 'pending_payment',
       monthlyLeadQuota: membershipTier.monthlyLeadQuota,
     });
+    await createMembershipPayment({
+      companyId: user.id,
+      companyName: user.companyName ?? user.name,
+      tier: membershipTier.id,
+      billingCycle,
+      periodMonths: billingPeriodMonths(billingCycle),
+      amountCny: membershipFeeFor(membershipTier.id, true, billingCycle),
+    });
     const res = NextResponse.json({
       id: user.id,
       role: user.role,
@@ -95,6 +105,8 @@ export async function POST(req: Request) {
         firstYearFeeCny: membershipTier.firstYearFeeCny,
         annualFeeCny: membershipTier.annualFeeCny,
         status: 'pending_payment',
+        billingCycle,
+        amountCny: membershipFeeFor(membershipTier.id, true, billingCycle),
       },
     });
     setSessionCookie(res, user.id, 'company');

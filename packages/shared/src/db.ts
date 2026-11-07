@@ -146,6 +146,8 @@ export const membershipPayments = pgTable('membership_payments', {
   companyId: integer('company_id').notNull(),
   companyName: text('company_name').notNull(),
   tier: text('tier').notNull(),
+  billingCycle: text('billing_cycle').notNull().default('annual'),
+  periodMonths: integer('period_months').notNull().default(12),
   amountCny: integer('amount_cny').notNull(),
   status: text('status').notNull().default('pending'),
   paymentReference: text('payment_reference'),
@@ -206,6 +208,8 @@ CREATE TABLE IF NOT EXISTS commission_settlements (
   platform_commission_cny integer NOT NULL, contractor_net_profit_cny integer NOT NULL,
   status text NOT NULL DEFAULT 'pending', created_at text NOT NULL, settled_at text
 );
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS estimated_cost_cny integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS profit_cny integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS platform_commission_cny integer DEFAULT 0;
@@ -216,7 +220,8 @@ ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_score integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_reason text;
 CREATE TABLE IF NOT EXISTS membership_payments (
   id serial PRIMARY KEY, company_id integer NOT NULL, company_name text NOT NULL,
-  tier text NOT NULL, amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
+  tier text NOT NULL, billing_cycle text NOT NULL DEFAULT 'annual', period_months integer DEFAULT 12,
+  amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
   payment_reference text, created_at text NOT NULL, paid_at text
 );
 CREATE TABLE IF NOT EXISTS contracts (
@@ -444,7 +449,7 @@ export async function incrementMonthlyLeadUsage(id: number) {
 }
 
 export async function createMembershipPayment(p: {
-  companyId: number; companyName: string; tier: string; amountCny: number; paymentReference?: string;
+  companyId: number; companyName: string; tier: string; amountCny: number; paymentReference?: string; billingCycle?: string; periodMonths?: number;
 }) {
   const db = await getDb();
   const [row] = await db.insert(membershipPayments).values({ ...p, status: 'pending', createdAt: now() }).returning();

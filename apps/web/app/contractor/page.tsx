@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CONTRACTOR_MEMBERSHIP_TIERS, getMembershipTier, type MembershipTierId } from "@i-renovation/shared/membership";
+import { CONTRACTOR_MEMBERSHIP_TIERS, getMembershipTier, membershipFeeFor, type MembershipBillingCycle, type MembershipTierId } from "@i-renovation/shared/membership";
 import { calculateContractorCommission, commissionLabel, type CommissionQuote } from "@i-renovation/shared/commission";
 import { explainFairBidding } from "@i-renovation/shared/fair-bidding";
 
@@ -111,6 +111,7 @@ export default function ContractorPortal() {
   const [tab, setTab] = useState<"projects" | "bids" | "orders" | "membership">("projects");
   const [membership, setMembership] = useState<MembershipProfile | null>(null);
   const [membershipBusy, setMembershipBusy] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<MembershipBillingCycle>('annual');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
@@ -204,7 +205,7 @@ export default function ContractorPortal() {
       const res = await fetch('/api/company/membership/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tierId, companyScale: membership?.companyScale ?? 'small' }),
+        body: JSON.stringify({ tierId, companyScale: membership?.companyScale ?? 'small', billingCycle }),
       });
       if (res.ok) setMembership(prev => ({ ...(prev ?? {}), membershipTier: tierId, membershipStatus: 'pending_payment', monthlyLeadQuota: getMembershipTier(tierId).monthlyLeadQuota, monthlyLeadsUsed: 0 }));
     } finally {
@@ -514,6 +515,15 @@ export default function ContractorPortal() {
                       不同套餐对应不同的客户资源数量、匹配优先级和品牌曝光。装修队规模会影响推荐套餐，也可以根据业务增长升级。
                     </p>
                   </div>
+                  <div className="role-tabs" style={{ marginTop: 0 }}>
+                    {([
+                      { key: 'annual', label: '按年' },
+                      { key: 'quarterly', label: '按季度' },
+                      { key: 'monthly', label: '按月' },
+                    ] as const).map(item => (
+                      <button key={item.key} className={`btn role-tab ${billingCycle === item.key ? 'active' : ''}`} onClick={() => setBillingCycle(item.key)}>{item.label}</button>
+                    ))}
+                  </div>
                   <div className="role-feature-grid">
                     {CONTRACTOR_MEMBERSHIP_TIERS.map((tier) => {
                       const active = membership?.membershipTier === tier.id;
@@ -521,8 +531,8 @@ export default function ContractorPortal() {
                         <div className="role-feature-card" key={tier.id} style={active ? { borderColor: 'var(--accent)', boxShadow: '0 16px 42px rgba(38,82,65,.12)' } : undefined}>
                           <b>{tier.badge}</b>
                           <h3>{tier.name}</h3>
-                          <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>首年 ¥{tier.firstYearFeeCny.toLocaleString()}</p>
-                          <p style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 8 }}>续费 ¥{tier.annualFeeCny.toLocaleString()} / 年</p>
+                          <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>首年 ¥{membershipFeeFor(tier.id, true, billingCycle).toLocaleString()} / {billingCycle === 'monthly' ? '月' : billingCycle === 'quarterly' ? '季' : '年'}</p>
+                          <p style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 8 }}>首年按年 ¥{tier.firstYearFeeCny.toLocaleString()} · 续费 ¥{tier.annualFeeCny.toLocaleString()} / 年</p>
                           <p>{tier.benefits.slice(0, 3).join(' · ')}</p>
                           <button
                             className={active ? 'btn btn-ghost' : 'btn btn-primary'}

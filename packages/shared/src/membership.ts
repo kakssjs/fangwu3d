@@ -1,5 +1,6 @@
 export type ContractorScale = 'small' | 'medium' | 'large' | 'enterprise';
 export type MembershipTierId = 'basic' | 'professional' | 'elite';
+export type MembershipBillingCycle = 'monthly' | 'quarterly' | 'annual';
 
 export interface ContractorMembershipTier {
   id: MembershipTierId;
@@ -7,6 +8,8 @@ export interface ContractorMembershipTier {
   subtitle: string;
   annualFeeCny: number;
   firstYearFeeCny: number;
+  firstYearMonthlyCny: number;
+  firstYearQuarterlyCny: number;
   recommendedScales: ContractorScale[];
   monthlyLeadQuota: number;
   maxActiveBids: number;
@@ -37,6 +40,8 @@ export const CONTRACTOR_MEMBERSHIP_TIERS: ContractorMembershipTier[] = [
     subtitle: '适合本地小型装修队',
     annualFeeCny: 1980,
     firstYearFeeCny: 399,
+    firstYearMonthlyCny: 39,
+    firstYearQuarterlyCny: 99,
     recommendedScales: ['small'],
     monthlyLeadQuota: 30,
     maxActiveBids: 5,
@@ -58,6 +63,8 @@ export const CONTRACTOR_MEMBERSHIP_TIERS: ContractorMembershipTier[] = [
     subtitle: '适合有稳定团队的装潢公司',
     annualFeeCny: 6800,
     firstYearFeeCny: 999,
+    firstYearMonthlyCny: 99,
+    firstYearQuarterlyCny: 249,
     recommendedScales: ['medium'],
     monthlyLeadQuota: 120,
     maxActiveBids: 15,
@@ -80,6 +87,8 @@ export const CONTRACTOR_MEMBERSHIP_TIERS: ContractorMembershipTier[] = [
     subtitle: '适合大型企业与区域品牌',
     annualFeeCny: 19800,
     firstYearFeeCny: 2980,
+    firstYearMonthlyCny: 299,
+    firstYearQuarterlyCny: 749,
     recommendedScales: ['large', 'enterprise'],
     monthlyLeadQuota: 500,
     maxActiveBids: 50,
@@ -113,17 +122,28 @@ export function recommendedTierForScale(scale: ContractorScale): ContractorMembe
 
 export function canReceiveLead(state: {
   membershipStatus?: string | null;
+  membershipExpiresAt?: string | null;
   monthlyLeadQuota?: number | null;
   monthlyLeadsUsed?: number | null;
 }) {
   const quota = Number(state.monthlyLeadQuota ?? CONTRACTOR_MEMBERSHIP_TIERS[0].monthlyLeadQuota);
   const used = Number(state.monthlyLeadsUsed ?? 0);
-  return state.membershipStatus === 'active' && used < quota;
+  const expired = !!state.membershipExpiresAt && new Date(state.membershipExpiresAt).getTime() < Date.now();
+  return state.membershipStatus === 'active' && !expired && used < quota;
 }
 
-export function membershipFeeFor(tierId: string | undefined | null, isFirstYear: boolean) {
+export function membershipFeeFor(
+  tierId: string | undefined | null,
+  isFirstYear: boolean,
+  billingCycle: MembershipBillingCycle = 'annual',
+) {
   const tier = getMembershipTier(tierId);
-  return isFirstYear ? tier.firstYearFeeCny : tier.annualFeeCny;
+  if (!isFirstYear) return billingCycle === 'annual' ? tier.annualFeeCny : billingCycle === 'quarterly' ? Math.round(tier.annualFeeCny / 4) : Math.round(tier.annualFeeCny / 12);
+  return billingCycle === 'monthly' ? tier.firstYearMonthlyCny : billingCycle === 'quarterly' ? tier.firstYearQuarterlyCny : tier.firstYearFeeCny;
+}
+
+export function billingPeriodMonths(billingCycle: MembershipBillingCycle) {
+  return billingCycle === 'monthly' ? 1 : billingCycle === 'quarterly' ? 3 : 12;
 }
 
 export function membershipAccess(tierId?: string | null) {

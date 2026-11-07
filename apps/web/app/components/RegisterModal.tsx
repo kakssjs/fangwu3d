@@ -22,6 +22,7 @@ type CompanyForm = {
   name: string;
   companyScale: 'small' | 'medium' | 'large' | 'enterprise';
   membershipTier: 'basic' | 'professional' | 'elite';
+  billingCycle: 'monthly' | 'quarterly' | 'annual';
   companyName: string;
   phone: string;
   email: string;
@@ -127,6 +128,7 @@ export default function RegisterModal({
     name: '',
     companyScale: 'small',
     membershipTier: 'basic',
+    billingCycle: 'annual',
     companyName: '',
     phone: '',
     email: '',
@@ -196,6 +198,7 @@ export default function RegisterModal({
           specialties: splitList(coForm.specialties),
           companyScale: coForm.companyScale,
           membershipTier: coForm.membershipTier,
+          billingCycle: coForm.billingCycle,
         }),
       });
       const data = (await res.json()) as { id?: number; role?: string; error?: string };
@@ -449,6 +452,18 @@ export default function RegisterModal({
                 <option value="basic">基础入驻版 · 首年 ¥399，续费 ¥1,980/年 · 30 条客户资源/月</option>
                 <option value="professional">专业增长版 · 首年 ¥999，续费 ¥6,800/年 · 120 条客户资源/月</option>
                 <option value="elite">品牌旗舰版 · 首年 ¥2,980，续费 ¥19,800/年 · 500 条客户资源/月</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>首年付费方式 *</label>
+              <select
+                className="form-input"
+                value={coForm.billingCycle}
+                onChange={(e) => setCoForm({ ...coForm, billingCycle: e.target.value as CompanyForm['billingCycle'] })}
+              >
+                <option value="annual">按年支付 · 首年总价最低</option>
+                <option value="quarterly">按季度支付 · 每 3 个月支付一次</option>
+                <option value="monthly">按月支付 · 每月支付一次</option>
               </select>
             </div>
             <div className="form-group">

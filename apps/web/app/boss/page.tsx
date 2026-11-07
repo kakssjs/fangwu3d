@@ -20,7 +20,7 @@ interface CommissionSettlement {
   platformCommissionCny: number; contractorNetProfitCny: number; status: string; createdAt: string; settledAt?: string | null;
 }
 interface MembershipPayment {
-  id: number; companyId: number; companyName: string; tier: string; amountCny: number;
+  id: number; companyId: number; companyName: string; tier: string; billingCycle?: string; periodMonths?: number; amountCny: number;
   status: string; paymentReference?: string | null; createdAt: string; paidAt?: string | null;
 }
 interface BossData {
@@ -331,12 +331,13 @@ export default function BossConsole() {
           </p>
           <div className="panel">
             <table className="data-table">
-              <thead><tr><th>公司</th><th>套餐</th><th>入驻费</th><th>支付凭证</th><th>状态</th><th>操作</th></tr></thead>
+              <thead><tr><th>公司</th><th>套餐</th><th>付费周期</th><th>入驻费</th><th>支付凭证</th><th>状态</th><th>操作</th></tr></thead>
               <tbody>
                 {(data?.membershipPayments ?? []).map(p => (
                   <tr key={p.id}>
                     <td>{p.companyName}</td>
                     <td>{p.tier}</td>
+                    <td>{p.billingCycle === 'monthly' ? '按月' : p.billingCycle === 'quarterly' ? '按季' : '按年'}</td>
                     <td>¥{p.amountCny.toLocaleString()}</td>
                     <td>{p.paymentReference || '-'}</td>
                     <td>{statusTag(p.status)}</td>
@@ -351,7 +352,7 @@ export default function BossConsole() {
                   </tr>
                 ))}
                 {(data?.membershipPayments ?? []).length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无入驻费支付记录</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无入驻费支付记录</td></tr>
                 )}
               </tbody>
             </table>
@@ -419,7 +420,7 @@ export default function BossConsole() {
                   </tr>
                 ))}
                 {(data?.orders ?? []).length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>
                     暂无订单 — 业主在项目页「发布到接单市场」后生成
                   </td></tr>
                 )}

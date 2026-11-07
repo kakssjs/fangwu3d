@@ -16,8 +16,10 @@ export async function POST(req: Request) {
     if (!updated) return NextResponse.json({ error: '支付记录不存在' }, { status: 404 });
     if (body.action === 'approve') {
       const tier = getMembershipTier(updated.tier);
-      const expires = new Date();
-      expires.setFullYear(expires.getFullYear() + 1);
+      const current = await getUser(updated.companyId);
+      const base = current?.membershipExpiresAt && new Date(current.membershipExpiresAt) > new Date() ? new Date(current.membershipExpiresAt) : new Date();
+      const expires = new Date(base);
+      expires.setMonth(expires.getMonth() + Number(updated.periodMonths ?? 12));
       await setCompanyMembership(updated.companyId, {
         membershipTier: tier.id,
         membershipStatus: 'active',
