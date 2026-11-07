@@ -62,3 +62,28 @@ Scene3D 的“导出 Blender / Pascal”按钮会下载：
 2. 导出 GLB 与 Blender 脚本。
 3. 在 Blender 中运行脚本。
 4. 使用 Cycles 256 samples + denoising 渲染最终装修效果图。
+
+## 高质量家具与材质库
+
+- `packages/shared/src/furniture.ts` 定义可替换家具清单：沙发、床、餐桌、橱柜、卫浴、书桌、书架、绿植、灯具等。
+- `Scene3D` 使用圆角几何、软包、金属腿、玻璃、石材、木作等分层建模。
+- 所有家具都可以后续替换为 GLB/GLTF 商业模型，尺寸和分类保持兼容。
+- 导出时会附带 `fangwu3d-furniture-library.json`。
+
+## Blender 批量渲染
+
+- `scripts/blender_batch_render.py` 支持扫描多个导出任务目录。
+- 每个目录包含 `scene.glb` 与 `job.json`。
+- Blender 脚本自动设置 Cycles、Denoising、灯光、相机并输出 PNG。
+
+运行示例：
+
+```bash
+blender --background --python scripts/blender_batch_render.py -- --jobs ./exports --samples 256
+```
+
+## Pascal Editor 深度编辑
+
+- `apps/web/lib/pascal-bridge.ts` 提供 Pascal 场景 JSON 和 MCP 工具定义。
+- 项目页面的 Pascal Bridge 面板支持下载、导入和保存编辑后的场景。
+- MCP 工具覆盖墙体、门窗、家具、材质、相机和 GLB 导出。

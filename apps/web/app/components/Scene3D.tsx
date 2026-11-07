@@ -1,10 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { generatePlanGeometry, type PlanGeometry, type Wall, type PlanRoom, type RoomGeom } from '@i-renovation/shared/plan';
 import { MATERIAL_PRESETS, getMaterialPreset, type MaterialPresetId, type MaterialFamily } from '@i-renovation/shared/materials';
+import { furnitureManifest } from '@i-renovation/shared/furniture';
 import {
   buildBlenderCyclesScript,
+  buildBlenderJob,
   buildPascalEditorPayload,
   downloadText,
   exportSceneGlb,
@@ -197,83 +200,222 @@ function addWall(scene: THREE.Scene, wall: Wall, group: THREE.Group, materials: 
   scene.add(group);
 }
 
+function addRoundedBox(
+  group: THREE.Group,
+  size: [number, number, number],
+  position: [number, number, number],
+  material: THREE.Material,
+  radius = 0.08,
+  rotationY = 0,
+) {
+  const safeRadius = Math.min(radius, Math.min(...size) * 0.22);
+  const mesh = new THREE.Mesh(new RoundedBoxGeometry(size[0], size[1], size[2], 4, safeRadius), material);
+  mesh.position.set(...position);
+  mesh.rotation.y = rotationY;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return mesh;
+}
+
 function addFurniture(group: THREE.Group, room: RoomGeom, materials: ReturnType<typeof makeMaterials>) {
   const centerX = room.x + room.w / 2;
   const centerZ = room.y + room.d / 2;
   const minSide = Math.min(room.w, room.d);
   const name = room.name;
+  const fabric = familyMaterial(materials.fabric);
+  const wood = familyMaterial(materials.wood);
+  const trim = familyMaterial(materials.trim);
+  const stone = familyMaterial(materials.stone);
+  const metal = familyMaterial(materials.metal);
+  const accent = familyMaterial(materials.accent);
+  const glass = familyMaterial(materials.glass, { side: THREE.DoubleSide });
 
-  const sofa = () => {
-    const width = Math.min(3.2, room.w * 0.52);
-    addBox(group, [width, 0.72, 0.92], [centerX, 0.46, room.y + room.d * 0.24], familyMaterial(materials.fabric));
-    addBox(group, [width, 0.72, 0.18], [centerX, 0.92, room.y + room.d * 0.24 - 0.42], familyMaterial(materials.fabric));
-    addBox(group, [Math.min(1.35, room.w * 0.22), 0.12, 0.72], [centerX, 0.2, room.y + room.d * 0.57], familyMaterial(materials.wood));
-    addBox(group, [Math.min(2.8, room.w * 0.42), 0.42, 0.48], [centerX, 0.34, room.y + room.d * 0.82], familyMaterial(materials.fabric));
-  };
-
-  const bed = () => {
-    const width = Math.min(1.9, room.w * 0.56);
-    const length = Math.min(2.15, room.d * 0.58);
-    addBox(group, [width, 0.52, length], [centerX, 0.34, centerZ], familyMaterial(materials.wood));
-    addBox(group, [width - 0.12, 0.28, length - 0.12], [centerX, 0.73, centerZ], familyMaterial(materials.fabric));
-    addBox(group, [width + 0.16, 1.05, 0.16], [centerX, 0.85, room.y + 0.22], familyMaterial(materials.wood));
-    addBox(group, [0.42, 0.38, 0.42], [centerX - width / 2 - 0.38, 0.34, room.y + 0.48], familyMaterial(materials.wood));
-    addBox(group, [0.42, 0.38, 0.42], [centerX + width / 2 + 0.38, 0.34, room.y + 0.48], familyMaterial(materials.wood));
-  };
-
-  const dining = () => {
-    const width = Math.min(1.85, room.w * 0.46);
-    addBox(group, [width, 0.12, 0.95], [centerX, 0.78, centerZ], familyMaterial(materials.wood));
-    addBox(group, [0.12, 0.72, 0.12], [centerX - width / 2 + 0.18, 0.39, centerZ - 0.32], familyMaterial(materials.metal));
-    addBox(group, [0.12, 0.72, 0.12], [centerX + width / 2 - 0.18, 0.39, centerZ - 0.32], familyMaterial(materials.metal));
-    addBox(group, [0.12, 0.72, 0.12], [centerX - width / 2 + 0.18, 0.39, centerZ + 0.32], familyMaterial(materials.metal));
-    addBox(group, [0.12, 0.72, 0.12], [centerX + width / 2 - 0.18, 0.39, centerZ + 0.32], familyMaterial(materials.metal));
-    for (const x of [centerX - width / 2 - 0.42, centerX + width / 2 + 0.42]) {
-      addBox(group, [0.48, 0.78, 0.48], [x, 0.42, centerZ], familyMaterial(materials.fabric));
+  const addPlant = (x: number, z: number, scale = 1) => {
+    addCylinder(group, 0.28 * scale, 0.34 * scale, [x, 0.18 * scale, z], stone, 24);
+    addCylinder(group, 0.07 * scale, 0.72 * scale, [x, 0.68 * scale, z], wood, 16);
+    for (let i = 0; i < 6; i++) {
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.32 * scale, 18, 12), familyMaterial(materials.accent, { roughness: 0.72 }));
+      leaf.scale.set(0.65, 1.25, 0.38);
+      leaf.position.set(x + Math.cos(i * 1.05) * 0.32 * scale, 1.12 * scale + (i % 2) * 0.18 * scale, z + Math.sin(i * 1.05) * 0.32 * scale);
+      leaf.rotation.y = i * 0.9;
+      leaf.castShadow = true;
+      group.add(leaf);
     }
   };
 
-  const kitchen = () => {
-    const length = Math.min(room.w * 0.78, 4.2);
-    addBox(group, [length, 0.9, 0.62], [centerX, 0.45, room.y + 0.52], familyMaterial(materials.trim));
-    addBox(group, [length + 0.08, 0.12, 0.72], [centerX, 0.96, room.y + 0.52], familyMaterial(materials.stone));
-    addBox(group, [Math.min(1.65, room.w * 0.34), 0.9, 0.72], [centerX, 0.45, centerZ + 0.22], familyMaterial(materials.wood));
-    addBox(group, [Math.min(1.75, room.w * 0.36), 0.1, 0.82], [centerX, 0.96, centerZ + 0.22], familyMaterial(materials.stone));
+  const addFloorLamp = (x: number, z: number) => {
+    addCylinder(group, 0.22, 0.08, [x, 0.04, z], metal, 24);
+    addCylinder(group, 0.035, 1.45, [x, 0.78, z], metal, 18);
+    const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.42, 24, 1, true), familyMaterial({ color: '#F1E2C2', roughness: 0.78, metalness: 0 }));
+    shade.position.set(x, 1.55, z);
+    shade.castShadow = true;
+    group.add(shade);
   };
 
-  const bathroom = () => {
-    addBox(group, [Math.min(1.35, room.w * 0.38), 0.78, 0.68], [room.x + room.w * 0.25, 0.39, room.y + room.d * 0.28], familyMaterial(materials.stone));
-    addCylinder(group, 0.31, 0.22, [room.x + room.w * 0.25, 0.88, room.y + room.d * 0.28], familyMaterial(materials.stone));
-    addBox(group, [Math.min(1.45, room.w * 0.42), 0.12, 0.62], [room.x + room.w * 0.72, 0.9, room.y + room.d * 0.26], familyMaterial(materials.stone));
-    addBox(group, [Math.min(1.55, room.w * 0.44), 0.08, 0.82], [room.x + room.w * 0.72, 0.08, room.y + room.d * 0.72], familyMaterial(materials.glass));
+  const addChair = (x: number, z: number, rotation = 0, compact = false) => {
+    const seatW = compact ? 0.46 : 0.52;
+    const seatD = compact ? 0.46 : 0.52;
+    addRoundedBox(group, [seatW, 0.16, seatD], [x, 0.48, z], fabric, 0.06, rotation);
+    addRoundedBox(group, [seatW, 0.68, 0.14], [x - Math.sin(rotation) * 0.23, 0.82, z - Math.cos(rotation) * 0.23], fabric, 0.055, rotation);
+    for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      addCylinder(group, 0.028, 0.46, [x + dx * seatW * 0.36, 0.23, z + dz * seatD * 0.36], metal, 12);
+    }
   };
 
-  const study = () => {
-    addBox(group, [Math.min(2.2, room.w * 0.58), 0.12, 0.72], [centerX, 0.78, room.y + room.d * 0.28], familyMaterial(materials.wood));
-    addBox(group, [0.48, 0.82, 0.48], [centerX, 0.4, room.y + room.d * 0.62], familyMaterial(materials.fabric));
-    addBox(group, [Math.min(1.9, room.w * 0.5), 0.35, 0.34], [centerX, 1.48, room.y + room.d * 0.12], familyMaterial(materials.trim));
-    for (let i = 0; i < 3; i++) addBox(group, [0.42, 0.12, 0.28], [centerX - 0.62 + i * 0.62, 1.7, room.y + room.d * 0.12], familyMaterial(materials.accent));
+  const addRug = (x: number, z: number, w: number, d: number, color = materials.fabric.color) => {
+    const rug = new THREE.Mesh(new RoundedBoxGeometry(w, 0.035, d, 3, 0.12), familyMaterial({ color, roughness: 0.96, metalness: 0 }));
+    rug.position.set(x, 0.14, z);
+    rug.receiveShadow = true;
+    group.add(rug);
   };
 
-  const balcony = () => {
-    addCylinder(group, 0.38, 0.12, [centerX, 0.72, centerZ], familyMaterial(materials.wood));
-    addCylinder(group, 0.08, 0.72, [centerX, 0.36, centerZ], familyMaterial(materials.metal));
-    addCylinder(group, 0.34, 0.55, [room.x + room.w * 0.2, 0.28, room.y + room.d * 0.3], familyMaterial(materials.trim));
-    addCylinder(group, 0.22, 0.75, [room.x + room.w * 0.2, 0.75, room.y + room.d * 0.3], familyMaterial(materials.accent), 16);
-    addBox(group, [Math.min(1.8, room.w * 0.52), 0.42, 0.52], [centerX, 0.28, room.y + room.d * 0.72], familyMaterial(materials.fabric));
+  const addSofa = () => {
+    const width = Math.min(3.25, room.w * 0.58);
+    const depth = Math.min(1.02, room.d * 0.24);
+    const z = room.y + room.d * 0.28;
+    addRug(centerX, room.y + room.d * 0.58, Math.min(3.45, room.w * 0.68), Math.min(2.25, room.d * 0.48), '#B6A494');
+    addRoundedBox(group, [width, 0.48, depth], [centerX, 0.42, z], fabric, 0.14);
+    addRoundedBox(group, [width - 0.18, 0.26, depth - 0.16], [centerX, 0.78, z + 0.02], fabric, 0.12);
+    addRoundedBox(group, [width - 0.22, 0.72, 0.18], [centerX, 1.02, z - depth * 0.38], fabric, 0.1);
+    addRoundedBox(group, [0.24, 0.72, depth + 0.08], [centerX - width / 2 + 0.1, 0.76, z], fabric, 0.1);
+    addRoundedBox(group, [0.24, 0.72, depth + 0.08], [centerX + width / 2 - 0.1, 0.76, z], fabric, 0.1);
+    for (let i = 0; i < 3; i++) {
+      addRoundedBox(group, [0.56, 0.16, 0.42], [centerX - width * 0.28 + i * width * 0.28, 0.98, z + 0.1], familyMaterial(i === 1 ? materials.accent : materials.fabric, { roughness: 0.9 }), 0.1, i === 1 ? 0.08 : -0.08);
+    }
+    for (const dx of [-1, 1]) {
+      for (const dz of [-1, 1]) {
+        addCylinder(group, 0.035, 0.18, [centerX + dx * (width / 2 - 0.18), 0.12, z + dz * (depth / 2 - 0.18)], metal, 12);
+      }
+    }
+    addRoundedBox(group, [1.35, 0.12, 0.72], [centerX, 0.38, room.y + room.d * 0.57], wood, 0.12);
+    addRoundedBox(group, [0.11, 0.28, 0.11], [centerX - 0.52, 0.22, room.y + room.d * 0.57], metal, 0.03);
+    addRoundedBox(group, [0.11, 0.28, 0.11], [centerX + 0.52, 0.22, room.y + room.d * 0.57], metal, 0.03);
+    addRoundedBox(group, [2.35, 0.58, 0.36], [centerX, 0.42, room.y + room.d * 0.83], wood, 0.08);
+    addRoundedBox(group, [1.82, 1.05, 0.08], [centerX, 1.42, room.y + room.d * 0.86], familyMaterial({ color: '#252826', roughness: 0.35, metalness: 0.18 }), 0.05);
+    addFloorLamp(centerX - width * 0.42, room.y + room.d * 0.18);
+    addPlant(centerX + width * 0.42, room.y + room.d * 0.18, 0.86);
   };
 
-  if (/客厅|起居|会客/.test(name)) sofa();
-  else if (/卧|睡房/.test(name)) bed();
-  else if (/餐/.test(name)) dining();
-  else if (/厨/.test(name)) kitchen();
-  else if (/卫|浴|洗手/.test(name)) bathroom();
-  else if (/书房|工作|办公/.test(name)) study();
-  else if (/阳台|露台/.test(name)) balcony();
-  else {
-    if (minSide > 2.2) sofa();
-    else addBox(group, [Math.min(1.2, room.w * 0.38), 0.72, 0.62], [centerX, 0.36, centerZ], familyMaterial(materials.fabric));
-  }
+  const addBedroom = () => {
+    const width = Math.min(1.95, room.w * 0.56);
+    const length = Math.min(2.18, room.d * 0.56);
+    const z = centerZ + 0.12;
+    addRug(centerX, z, Math.min(3.15, room.w * 0.76), Math.min(2.8, room.d * 0.7), '#C6B7A7');
+    addRoundedBox(group, [width + 0.18, 0.32, length + 0.12], [centerX, 0.33, z], wood, 0.1);
+    addRoundedBox(group, [width, 0.38, length - 0.08], [centerX, 0.72, z], fabric, 0.16);
+    addRoundedBox(group, [width + 0.24, 1.12, 0.18], [centerX, 1.13, z - length / 2], trim, 0.12);
+    addRoundedBox(group, [width * 0.86, 0.18, 0.62], [centerX, 1.08, z - length * 0.22], familyMaterial({ color: '#E6DED1', roughness: 0.92, metalness: 0 }), 0.12);
+    for (const dx of [-1, 1]) {
+      addRoundedBox(group, [0.52, 0.16, 0.68], [centerX + dx * width * 0.26, 1.15, z - length * 0.32], familyMaterial({ color: '#F4EEE4', roughness: 0.92, metalness: 0 }), 0.1, dx * 0.05);
+    }
+    for (const dx of [-1, 1]) {
+      addRoundedBox(group, [0.52, 0.46, 0.42], [centerX + dx * (width / 2 + 0.36), 0.38, z - length * 0.32], wood, 0.08);
+      addCylinder(group, 0.035, 0.28, [centerX + dx * (width / 2 + 0.36), 0.84, z - length * 0.32], metal, 12);
+      const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.28, 20, 1, true), familyMaterial({ color: '#E6D0A5', roughness: 0.82, metalness: 0 }));
+      shade.position.set(centerX + dx * (width / 2 + 0.36), 1.08, z - length * 0.32);
+      group.add(shade);
+    }
+    addRoundedBox(group, [Math.min(2.2, room.w * 0.58), 0.58, 0.62], [centerX, 1.2, room.y + 0.32], wood, 0.08);
+    for (let i = 0; i < 4; i++) addBox(group, [0.035, 0.42, 0.025], [centerX - 0.72 + i * 0.48, 1.2, room.y + 0.01], metal);
+  };
+
+  const addDining = () => {
+    const width = Math.min(2.05, room.w * 0.52);
+    const depth = Math.min(1.05, room.d * 0.34);
+    addRug(centerX, centerZ, Math.min(3.15, room.w * 0.72), Math.min(2.35, room.d * 0.62), '#B9AA99');
+    addRoundedBox(group, [width, 0.14, depth], [centerX, 0.82, centerZ], wood, 0.08);
+    addRoundedBox(group, [width * 0.78, 0.12, depth * 0.68], [centerX, 0.73, centerZ], familyMaterial(materials.wood), 0.04);
+    for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      addCylinder(group, 0.055, 0.72, [centerX + dx * width * 0.36, 0.4, centerZ + dz * depth * 0.32], metal, 16);
+    }
+    for (const side of [-1, 1]) {
+      addChair(centerX + side * (width / 2 + 0.5), centerZ, side > 0 ? Math.PI : 0, true);
+      addChair(centerX + side * (width / 2 + 0.5), centerZ + 0.72, side > 0 ? Math.PI : 0, true);
+    }
+    addChair(centerX, centerZ - depth / 2 - 0.52, 0, true);
+    addChair(centerX, centerZ + depth / 2 + 0.52, Math.PI, true);
+    addCylinder(group, 0.18, 0.08, [centerX, 0.98, centerZ], stone, 24);
+    addPlant(centerX + width * 0.34, centerZ - depth * 0.3, 0.5);
+  };
+
+  const addKitchen = () => {
+    const length = Math.min(room.w * 0.82, 4.35);
+    const z = room.y + 0.52;
+    addRoundedBox(group, [length, 0.86, 0.66], [centerX, 0.46, z], trim, 0.06);
+    addRoundedBox(group, [length + 0.1, 0.12, 0.74], [centerX, 0.96, z], stone, 0.04);
+    for (let i = 0; i < Math.floor(length / 0.72); i++) {
+      addBox(group, [0.025, 0.55, 0.012], [centerX - length / 2 + 0.38 + i * 0.72, 0.5, z - 0.338], metal);
+    }
+    addRoundedBox(group, [1.9, 0.88, 0.92], [centerX, 0.46, centerZ + 0.28], wood, 0.08);
+    addRoundedBox(group, [2.02, 0.12, 1.02], [centerX, 0.96, centerZ + 0.28], stone, 0.04);
+    addBox(group, [0.62, 0.055, 0.42], [centerX - 0.42, 1.035, centerZ + 0.28], metal);
+    addBox(group, [0.52, 0.055, 0.38], [centerX + 0.45, 1.035, centerZ + 0.28], familyMaterial({ color: '#242827', roughness: 0.28, metalness: 0.36 }));
+    for (const dx of [-0.17, 0.17]) for (const dz of [-0.12, 0.12]) addCylinder(group, 0.085, 0.025, [centerX + 0.45 + dx, 1.075, centerZ + 0.28 + dz], accent, 20);
+    addRoundedBox(group, [0.84, 1.88, 0.72], [room.x + room.w * 0.82, 0.95, room.y + room.d * 0.5], metal, 0.08);
+    addBox(group, [0.025, 1.15, 0.018], [room.x + room.w * 0.82 - 0.3, 1.12, room.y + room.d * 0.5 - 0.365], trim);
+    addPlant(room.x + room.w * 0.16, room.y + room.d * 0.75, 0.68);
+  };
+
+  const addBathroom = () => {
+    const vanityW = Math.min(1.55, room.w * 0.45);
+    addRoundedBox(group, [vanityW, 0.82, 0.64], [room.x + room.w * 0.25, 0.43, room.y + room.d * 0.27], wood, 0.08);
+    addRoundedBox(group, [vanityW + 0.08, 0.12, 0.7], [room.x + room.w * 0.25, 0.9, room.y + room.d * 0.27], stone, 0.05);
+    addRoundedBox(group, [vanityW * 0.62, 0.16, 0.42], [room.x + room.w * 0.25, 1.01, room.y + room.d * 0.27], familyMaterial({ color: '#F2F4F1', roughness: 0.18, metalness: 0.02 }), 0.12);
+    addCylinder(group, 0.035, 0.22, [room.x + room.w * 0.25, 1.18, room.y + room.d * 0.18], metal, 16);
+    addRoundedBox(group, [vanityW * 0.78, 0.82, 0.06], [room.x + room.w * 0.25, 1.68, room.y + 0.08], glass, 0.04);
+    const showerX = room.x + room.w * 0.72;
+    const showerZ = room.y + room.d * 0.64;
+    addRoundedBox(group, [Math.min(1.35, room.w * 0.38), 0.08, Math.min(1.02, room.d * 0.32)], [showerX, 0.12, showerZ], stone, 0.04);
+    addBox(group, [Math.min(1.35, room.w * 0.38), 2.08, 0.035], [showerX, 1.12, showerZ - Math.min(1.02, room.d * 0.32) / 2], glass);
+    addBox(group, [0.035, 2.08, Math.min(1.02, room.d * 0.32)], [showerX - Math.min(1.35, room.w * 0.38) / 2, 1.12, showerZ], glass);
+    addCylinder(group, 0.11, 0.035, [showerX, 2.12, showerZ], metal, 24);
+    addCylinder(group, 0.025, 0.38, [showerX, 1.95, showerZ], metal, 16);
+    const toiletX = room.x + room.w * 0.78;
+    const toiletZ = room.y + room.d * 0.23;
+    addRoundedBox(group, [0.42, 0.42, 0.62], [toiletX, 0.3, toiletZ], familyMaterial({ color: '#F5F4EF', roughness: 0.22, metalness: 0.01 }), 0.14);
+    addRoundedBox(group, [0.46, 0.58, 0.18], [toiletX, 0.63, toiletZ - 0.22], familyMaterial({ color: '#F5F4EF', roughness: 0.22, metalness: 0.01 }), 0.1);
+  };
+
+  const addStudy = () => {
+    const deskW = Math.min(2.15, room.w * 0.58);
+    addRug(centerX, centerZ, Math.min(2.8, room.w * 0.66), Math.min(2.15, room.d * 0.58), '#AFA89B');
+    addRoundedBox(group, [deskW, 0.12, 0.76], [centerX, 0.79, room.y + room.d * 0.3], wood, 0.06);
+    for (const dx of [-1, 1]) addRoundedBox(group, [0.12, 0.72, 0.62], [centerX + dx * (deskW / 2 - 0.18), 0.39, room.y + room.d * 0.3], metal, 0.035);
+    addRoundedBox(group, [0.62, 0.18, 0.62], [centerX, 0.5, room.y + room.d * 0.62], fabric, 0.1);
+    addRoundedBox(group, [0.62, 0.82, 0.16], [centerX, 0.92, room.y + room.d * 0.74], fabric, 0.08);
+    for (const dx of [-1, 1]) addCylinder(group, 0.035, 0.7, [centerX + dx * 0.23, 0.31, room.y + room.d * 0.62], metal, 12);
+    addRoundedBox(group, [Math.min(1.75, room.w * 0.5), 0.38, 0.32], [centerX, 1.7, room.y + 0.18], trim, 0.05);
+    for (let i = 0; i < 5; i++) addBox(group, [0.16, 0.3 + (i % 2) * 0.12, 0.18], [centerX - 0.65 + i * 0.32, 1.78, room.y + 0.15], i % 2 ? accent : wood);
+    addFloorLamp(centerX + deskW * 0.38, room.y + room.d * 0.22);
+  };
+
+  const addBalcony = () => {
+    addRug(centerX, centerZ, Math.min(2.25, room.w * 0.58), Math.min(1.75, room.d * 0.48), '#A7A394');
+    addCylinder(group, 0.42, 0.12, [centerX, 0.75, centerZ], wood, 28);
+    addCylinder(group, 0.075, 0.68, [centerX, 0.39, centerZ], metal, 18);
+    addChair(centerX - 0.72, centerZ, Math.PI / 2, true);
+    addChair(centerX + 0.72, centerZ, -Math.PI / 2, true);
+    addRoundedBox(group, [Math.min(1.7, room.w * 0.48), 0.48, 0.52], [centerX, 0.3, room.y + room.d * 0.72], fabric, 0.12);
+    addPlant(room.x + room.w * 0.18, room.y + room.d * 0.28, 0.78);
+    addPlant(room.x + room.w * 0.82, room.y + room.d * 0.3, 0.62);
+  };
+
+  const addFlex = () => {
+    addRoundedBox(group, [Math.min(1.25, room.w * 0.38), 0.74, 0.68], [centerX, 0.39, centerZ], fabric, 0.12);
+    addPlant(centerX + room.w * 0.25, centerZ, 0.82);
+    addFloorLamp(centerX - room.w * 0.25, centerZ + room.d * 0.12);
+  };
+
+  if (/客厅|起居|会客/.test(name)) addSofa();
+  else if (/卧|睡房/.test(name)) addBedroom();
+  else if (/餐/.test(name)) addDining();
+  else if (/厨/.test(name)) addKitchen();
+  else if (/卫|浴|洗手/.test(name)) addBathroom();
+  else if (/书房|工作|办公/.test(name)) addStudy();
+  else if (/阳台|露台/.test(name)) addBalcony();
+  else if (minSide > 2.2) addFlex();
+  else addFlex();
 }
 
 function addCeiling(group: THREE.Group, plan: PlanGeometry, materials: ReturnType<typeof makeMaterials>) {
@@ -519,6 +661,8 @@ export default function Scene3D({ geometry, rooms, presetId, onPresetChange }: P
       downloadText(buildBlenderCyclesScript('fangwu3d-renovation.glb', activePreset), 'fangwu3d-blender-cycles.py');
       downloadText(JSON.stringify(buildPascalEditorPayload(planRef.current, activePreset), null, 2), 'fangwu3d-pascal-editor.json', 'application/json');
       downloadText(JSON.stringify(MATERIAL_PRESETS, null, 2), 'fangwu3d-material-library.json', 'application/json');
+      downloadText(JSON.stringify(furnitureManifest('high'), null, 2), 'fangwu3d-furniture-library.json', 'application/json');
+      downloadText(JSON.stringify(buildBlenderJob(planRef.current, activePreset), null, 2), 'fangwu3d-blender-job.json', 'application/json');
     } finally {
       setExporting(false);
     }

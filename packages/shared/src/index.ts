@@ -75,3 +75,4 @@ export const FORBIDDEN_ACTIONS = ['take_payment', 'sign_contract', 'verify_contr
 export const CORE_CHAIN = ['floor_plan', 'designer', 'quote', 'qa'] as const;
 export * from './materials';
 export * from './scene3d';
+export * from './furniture';

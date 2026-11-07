@@ -27,6 +27,10 @@
     "./scene3d": {
       "types": "./src/scene3d.ts",
       "default": "./src/scene3d.ts"
+    },
+    "./furniture": {
+      "types": "./src/furniture.ts",
+      "default": "./src/furniture.ts"
     }
   }
 }

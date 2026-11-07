@@ -6,6 +6,7 @@ import { buildSceneModel, type SceneModel } from '@i-renovation/shared/scene3d';
 import { describeMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
+import PascalBridge from '../../components/PascalBridge';
 import { agentOf } from '@/lib/agents';
 
 const Scene3D = lazy(() => import('../../components/Scene3D'));
@@ -957,6 +958,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>Loading 3D...</div>}>
               <Scene3D geometry={effGeom} rooms={effRooms} presetId={activeSceneModel?.materialPresetId as MaterialPresetId | undefined} />
             </Suspense>
+            <PascalBridge
+              projectId={Number(id)}
+              sceneModel={activeSceneModel}
+              onImported={(model) => {
+                setCustomGeom(model.geometry);
+                setFpSource('user');
+              }}
+            />
             {effWarnings.length > 0 && (
               <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>
                 ⚠ ForgeFloor 校验提示：{effWarnings.join('；')}
@@ -1304,4 +1313,3 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     </main>
   );
 }
-
