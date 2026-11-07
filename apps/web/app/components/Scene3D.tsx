@@ -7,6 +7,7 @@ import { MATERIAL_PRESETS, getMaterialPreset, type MaterialPresetId, type Materi
 import { furnitureManifest } from '@i-renovation/shared/furniture';
 import {
   buildBlenderCyclesScript,
+  buildBlenderBatchScript,
   buildBlenderJob,
   buildPascalEditorPayload,
   downloadText,
@@ -663,6 +664,7 @@ export default function Scene3D({ geometry, rooms, presetId, onPresetChange }: P
       downloadText(JSON.stringify(MATERIAL_PRESETS, null, 2), 'fangwu3d-material-library.json', 'application/json');
       downloadText(JSON.stringify(furnitureManifest('high'), null, 2), 'fangwu3d-furniture-library.json', 'application/json');
       downloadText(JSON.stringify(buildBlenderJob(planRef.current, activePreset), null, 2), 'fangwu3d-blender-job.json', 'application/json');
+      downloadText(buildBlenderBatchScript(), 'fangwu3d-blender-batch.py', 'text/x-python');
     } finally {
       setExporting(false);
     }

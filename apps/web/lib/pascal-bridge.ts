@@ -1,4 +1,4 @@
-import type { SceneModel } from '@i-renovation/shared/scene3d';
+import type { SceneModel, SceneCamera, FurniturePlacement } from '@i-renovation/shared/scene3d';
 import { getMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
 import { furnitureManifest } from '@i-renovation/shared/furniture';
 
@@ -12,7 +12,7 @@ export interface PascalScenePayload {
   materialPresetId: MaterialPresetId;
   rooms: SceneModel['rooms'];
   furniture: ReturnType<typeof furnitureManifest>;
-  camera: { theta: number; phi: number; radius: number; target: [number, number, number] };
+  camera: SceneCamera;
   tools: string[];
 }
 
@@ -31,7 +31,7 @@ export function buildPascalScene(model: SceneModel): PascalScenePayload {
     materialPresetId: model.materialPresetId,
     rooms: model.rooms,
     furniture: furnitureManifest('high'),
-    camera: {
+    camera: model.camera ?? {
       theta: 0.9,
       phi: 1.02,
       radius: Math.max(model.geometry.width, model.geometry.depth) * 1.85,
@@ -59,6 +59,12 @@ export function parsePascalScene(payload: PascalScenePayload): SceneModel | null
     geometry: payload.geometry,
     materialPresetId: payload.materialPresetId,
     materialPreset: payload.materials ?? preset,
+    camera: payload.camera ?? {
+      theta: 0.9,
+      phi: 1.02,
+      radius: Math.max(payload.geometry.width, payload.geometry.depth) * 1.85,
+      target: [payload.geometry.width / 2, 1.05, payload.geometry.depth / 2],
+    },
     rooms: payload.rooms ?? payload.geometry.rooms.map((room) => ({
       name: room.name,
       area: room.area,
@@ -111,4 +117,46 @@ export function buildPascalMcpTools() {
       },
     ],
   };
+}
+
+
+export type PascalEditAction =
+  | { type: 'set_camera'; camera: SceneCamera }
+  | { type: 'set_material_preset'; materialPresetId: MaterialPresetId }
+  | { type: 'place_furniture'; roomId: string; placement: FurniturePlacement }
+  | { type: 'replace_geometry'; geometry: SceneModel['geometry'] };
+
+export function applyPascalEdit(model: SceneModel, action: PascalEditAction): SceneModel {
+  switch (action.type) {
+    case 'set_camera':
+      return { ...model, camera: action.camera };
+    case 'set_material_preset':
+      return {
+        ...model,
+        materialPresetId: action.materialPresetId,
+        materialPreset: getMaterialPreset(action.materialPresetId),
+      };
+    case 'replace_geometry':
+      return {
+        ...model,
+        geometry: action.geometry,
+        rooms: action.geometry.rooms.map((room, index) => ({
+          name: room.name,
+          area: room.area,
+          bounds: { x: room.x, y: room.y, w: room.w, d: room.d },
+          furniture: model.rooms[index]?.furniture ?? 'flex',
+          camera: model.rooms[index]?.camera ?? { theta: 0.9, phi: 1.02, radius: Math.max(room.w, room.d) * 2.25 },
+          placements: model.rooms[index]?.placements ?? [],
+        })),
+      };
+    case 'place_furniture':
+      return {
+        ...model,
+        rooms: model.rooms.map((room) => room.name === action.roomId
+          ? { ...room, placements: [...(room.placements ?? []), action.placement] }
+          : room),
+      };
+    default:
+      return model;
+  }
 }

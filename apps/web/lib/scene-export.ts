@@ -55,6 +55,36 @@ print('I Renovation Cycles scene ready:', glb_path)
 `;
 }
 
+export function buildBlenderBatchScript() {
+  return `# Run with: blender --background --python fangwu3d-blender-batch.py -- --jobs ./exports
+import argparse, json, sys
+from pathlib import Path
+import bpy
+from mathutils import Vector
+
+def args():
+    argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+    p = argparse.ArgumentParser(); p.add_argument('--jobs', default='exports'); p.add_argument('--samples', type=int, default=256); p.add_argument('--output-name', default='render.png'); return p.parse_args(argv)
+def point_at(obj, target):
+    obj.rotation_euler = (Vector(target) - obj.location).to_track_quat('-Z', 'Y').to_euler()
+def render_job(job_dir, samples, output_name):
+    glbs = sorted(job_dir.glob('*.glb'))
+    if not glbs: return
+    bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
+    bpy.ops.import_scene.gltf(filepath=str(glbs[0]))
+    scene = bpy.context.scene; scene.render.engine = 'CYCLES'; scene.cycles.samples = samples; scene.cycles.use_denoising = True
+    scene.render.image_settings.file_format = 'PNG'; scene.render.filepath = str(job_dir / output_name)
+    job = json.loads((job_dir / 'job.json').read_text(encoding='utf-8')) if (job_dir / 'job.json').exists() else {}
+    cam_data = bpy.data.cameras.new('Camera'); cam = bpy.data.objects.new('Camera', cam_data); scene.collection.objects.link(cam); scene.camera = cam
+    cfg = job.get('camera', {}); cam.location = cfg.get('location', [9.5, -11.5, 8.5]); point_at(cam, cfg.get('target', [0, 0, 1])); cam_data.lens = cfg.get('lens', 42)
+    bpy.ops.render.render(write_still=True)
+def main():
+    a = args(); root = Path(a.jobs).resolve(); dirs = [p for p in sorted(root.iterdir()) if p.is_dir()] or [root]
+    for d in dirs: render_job(d, a.samples, a.output_name)
+if __name__ == '__main__': main()
+`;
+}
+
 export function buildBlenderJob(plan: PlanGeometry, preset: MaterialPreset) {
   return {
     schema: 'i-renovation-blender-job@1',

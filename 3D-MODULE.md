@@ -87,3 +87,16 @@ blender --background --python scripts/blender_batch_render.py -- --jobs ./export
 - `apps/web/lib/pascal-bridge.ts` 提供 Pascal 场景 JSON 和 MCP 工具定义。
 - 项目页面的 Pascal Bridge 面板支持下载、导入和保存编辑后的场景。
 - MCP 工具覆盖墙体、门窗、家具、材质、相机和 GLB 导出。
+
+### Pascal 编辑接口
+
+`POST /api/pascal/edit` 接收 `projectId`、`sceneModel` 和 `action`，支持：
+
+```json
+{ "type": "set_camera", "camera": {} }
+{ "type": "set_material_preset", "materialPresetId": "quiet-luxury" }
+{ "type": "place_furniture", "roomId": "客厅", "placement": {} }
+{ "type": "replace_geometry", "geometry": {} }
+```
+
+编辑后的 `scene_model` 会覆盖式保存，页面和后续 Agent 都会使用同一份模型。

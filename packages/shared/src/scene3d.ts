@@ -15,6 +15,20 @@ export type FurnitureCategory =
   | 'balcony'
   | 'flex';
 
+export interface FurniturePlacement {
+  itemId: string;
+  x: number;
+  y: number;
+  rotation: number;
+}
+
+export interface SceneCamera {
+  theta: number;
+  phi: number;
+  radius: number;
+  target: [number, number, number];
+}
+
 export interface SceneRoomModel {
   name: string;
   area: number;
@@ -22,6 +36,7 @@ export interface SceneRoomModel {
   furniture: FurnitureCategory;
   /** 3D 视图中的推荐相机朝向：房间中心 + 视角 */
   camera: { theta: number; phi: number; radius: number };
+  placements?: FurniturePlacement[];
 }
 
 export interface SceneModel {
@@ -33,6 +48,7 @@ export interface SceneModel {
   materialPresetId: MaterialPresetId;
   materialPreset: MaterialPreset;
   rooms: SceneRoomModel[];
+  camera: SceneCamera;
   capabilities: {
     pascalEditorPayload: true;
     blenderCyclesExport: true;
@@ -78,6 +94,12 @@ export function buildSceneModel(
     geometry,
     materialPresetId,
     materialPreset: getMaterialPreset(materialPresetId),
+    camera: {
+      theta: 0.9,
+      phi: 1.02,
+      radius: Math.max(geometry.width, geometry.depth) * 1.85,
+      target: [geometry.width / 2, 1.05, geometry.depth / 2],
+    },
     rooms: geometry.rooms.map((room) => ({
       name: room.name,
       area: room.area,
@@ -88,6 +110,7 @@ export function buildSceneModel(
         phi: 1.02,
         radius: Math.max(room.w, room.d) * 2.25,
       },
+      placements: [],
     })),
     capabilities: {
       pascalEditorPayload: true,
