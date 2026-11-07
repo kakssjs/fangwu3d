@@ -410,12 +410,6 @@ export async function createUser(u: {
   return row;
 }
 
-/** 记下已验证的邮箱（认领旧账号时用） */
-export async function setUserVerifiedEmail(id: number, email: string) {
-  const db = await getDb();
-  await db.update(users).set({ email, emailVerifiedAt: now() }).where(eq(users.id, id));
-}
-
 /** 按「已验证」的邮箱找账号（邮箱统一小写）。只填写、没验证过的邮箱找不到。 */
 export async function getUserByVerifiedEmail(email: string) {
   const db = await getDb();

@@ -201,6 +201,9 @@ export default function RegisterModal({
   const [homeCode, setHomeCode] = useState('');
   const [coCode, setCoCode] = useState('');
   const [loginWith, setLoginWith] = useState<'phone' | 'email'>('phone');
+  // 注册方式二选一：手机号 + 密码，或邮箱 + 验证码
+  const [regWith, setRegWith] = useState<'phone' | 'email'>('phone');
+  const byEmailReg = emailOn && regWith === 'email';
   const [loginEmail, setLoginEmail] = useState('');
   const [loginCode, setLoginCode] = useState('');
   useEffect(() => {
@@ -249,10 +252,11 @@ export default function RegisterModal({
         body: JSON.stringify({
           role: 'homeowner',
           name: homeForm.name,
-          phone: homeForm.phone,
+          method: byEmailReg ? 'email' : 'phone',
+          phone: byEmailReg ? undefined : homeForm.phone,
           email: homeForm.email,
           emailCode: homeCode,
-          password: homeForm.password,
+          password: byEmailReg ? undefined : homeForm.password,
         }),
       });
       const data = (await res.json()) as { id?: number; role?: string; error?: string };
@@ -282,10 +286,11 @@ export default function RegisterModal({
           role: 'company',
           name: coForm.name,
           companyName: coForm.companyName,
-          phone: coForm.phone,
+          method: byEmailReg ? 'email' : 'phone',
+          phone: byEmailReg ? undefined : coForm.phone,
           email: coForm.email,
           emailCode: coCode,
-          password: coForm.password,
+          password: byEmailReg ? undefined : coForm.password,
           license: coForm.license,
           qualifications: splitList(coForm.qualifications),
           districts: splitList(coForm.districts),
@@ -487,45 +492,59 @@ export default function RegisterModal({
                 onChange={(e) => setHomeForm({ ...homeForm, name: e.target.value })}
               />
             </div>
-            <div className="form-group">
-              <label>手机号 *</label>
-              <input
-                className="form-input"
-                required
-                type="tel"
-                placeholder="请输入手机号"
-                value={homeForm.phone}
-                onChange={(e) => setHomeForm({ ...homeForm, phone: e.target.value })}
-              />
-            </div>
-            {emailOn ? (
+            {emailOn && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button type="button" className={regWith === 'phone' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setRegWith('phone'); }}>
+                  手机号注册
+                </button>
+                <button type="button" className={regWith === 'email' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setRegWith('email'); }}>
+                  邮箱注册
+                </button>
+              </div>
+            )}
+            {byEmailReg ? (
               <EmailCodeInput email={homeForm.email} onEmail={(v) => setHomeForm({ ...homeForm, email: v })}
                 code={homeCode} onCode={setHomeCode} purpose="register" placeholder="用于登录和接收设计方案通知" />
             ) : (
-              <div className="form-group">
-                <label>邮箱（选填）</label>
-                <input
-                  className="form-input"
-                  type="email"
-                  placeholder="用于接收设计方案通知"
-                  value={homeForm.email}
-                  onChange={(e) => setHomeForm({ ...homeForm, email: e.target.value })}
-                />
-              </div>
+              <>
+                <div className="form-group">
+                  <label>手机号 *</label>
+                  <input
+                    className="form-input"
+                    required
+                    type="tel"
+                    placeholder="请输入手机号"
+                    value={homeForm.phone}
+                    onChange={(e) => setHomeForm({ ...homeForm, phone: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>邮箱（选填）</label>
+                  <input
+                    className="form-input"
+                    type="email"
+                    placeholder="用于接收设计方案通知"
+                    value={homeForm.email}
+                    onChange={(e) => setHomeForm({ ...homeForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>密码 *（至少 8 位）</label>
+                  <input
+                    className="form-input"
+                    required
+                    minLength={8}
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="设置登录密码"
+                    value={homeForm.password}
+                    onChange={(e) => setHomeForm({ ...homeForm, password: e.target.value })}
+                  />
+                </div>
+              </>
             )}
-            <div className="form-group">
-              <label>密码 *（至少 8 位）</label>
-              <input
-                className="form-input"
-                required
-                minLength={8}
-                type="password"
-                autoComplete="new-password"
-                placeholder="设置登录密码"
-                value={homeForm.password}
-                onChange={(e) => setHomeForm({ ...homeForm, password: e.target.value })}
-              />
-            </div>
             {error && (
               <p style={{ color: 'var(--accent-danger)', fontSize: 13, marginTop: -6, marginBottom: 12 }}>{error}</p>
             )}
@@ -606,45 +625,59 @@ export default function RegisterModal({
                 onChange={(e) => setCoForm({ ...coForm, companyName: e.target.value })}
               />
             </div>
-            <div className="form-group">
-              <label>手机号 *</label>
-              <input
-                className="form-input"
-                required
-                type="tel"
-                placeholder="请输入手机号"
-                value={coForm.phone}
-                onChange={(e) => setCoForm({ ...coForm, phone: e.target.value })}
-              />
-            </div>
-            {emailOn ? (
+            {emailOn && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button type="button" className={regWith === 'phone' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setRegWith('phone'); }}>
+                  手机号注册
+                </button>
+                <button type="button" className={regWith === 'email' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setRegWith('email'); }}>
+                  邮箱注册
+                </button>
+              </div>
+            )}
+            {byEmailReg ? (
               <EmailCodeInput email={coForm.email} onEmail={(v) => setCoForm({ ...coForm, email: v })}
                 code={coCode} onCode={setCoCode} purpose="register" placeholder="用于登录和接收订单通知" />
             ) : (
-              <div className="form-group">
-                <label>邮箱（选填）</label>
-                <input
-                  className="form-input"
-                  type="email"
-                  placeholder="请输入邮箱"
-                  value={coForm.email}
-                  onChange={(e) => setCoForm({ ...coForm, email: e.target.value })}
-                />
-              </div>
+              <>
+                <div className="form-group">
+                  <label>手机号 *</label>
+                  <input
+                    className="form-input"
+                    required
+                    type="tel"
+                    placeholder="请输入手机号"
+                    value={coForm.phone}
+                    onChange={(e) => setCoForm({ ...coForm, phone: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>邮箱（选填）</label>
+                  <input
+                    className="form-input"
+                    type="email"
+                    placeholder="请输入邮箱"
+                    value={coForm.email}
+                    onChange={(e) => setCoForm({ ...coForm, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>密码 *（至少 8 位）</label>
+                  <input
+                    className="form-input"
+                    required
+                    minLength={8}
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="设置登录密码"
+                    value={coForm.password}
+                    onChange={(e) => setCoForm({ ...coForm, password: e.target.value })}
+                  />
+                </div>
+              </>
             )}
-            <div className="form-group">
-              <label>密码 *（至少 8 位）</label>
-              <input
-                className="form-input"
-                required
-                minLength={8}
-                type="password"
-                autoComplete="new-password"
-                placeholder="设置登录密码"
-                value={coForm.password}
-                onChange={(e) => setCoForm({ ...coForm, password: e.target.value })}
-              />
-            </div>
             <div className="form-group">
               <label>营业执照号（选填）</label>
               <input
