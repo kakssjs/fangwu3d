@@ -22,6 +22,10 @@ export async function POST(req: Request) {
     }
 
     const user = await getUserByPhone(phone);
+    // 旧版本创建的账号没有密码：告诉用户怎么办，而不是只说「密码错误」
+    if (user && !user.passwordHash) {
+      return NextResponse.json({ error: '这个账号是旧版本创建的，还没有设置密码。请点「注册」，用同一手机号和同一身份设置一个密码。' }, { status: 401 });
+    }
     const check = checkPassword(password, user?.passwordHash);
     if (!user || !check.ok) return NextResponse.json({ error: WRONG }, { status: 401 });
     // 旧账号的明文密码：登录成功后改存哈希

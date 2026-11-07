@@ -112,9 +112,16 @@ On a real server set all three as environment variables, with a different secret
 
 ## 7. Known limits
 
-- **Accounts created before this change without a password can't sign in.** That includes the
-  earlier test homeowner. They need to register again. There is no password reset, and no boss
-  tool to set one.
+- **Old accounts with no password** (made before passwords were required; the registration form
+  used to make the password optional). They used to be locked out: login said "wrong password" and
+  registering said "already registered". Now the login says the account has no password yet, and
+  registering again with **the same phone number and the same account type** sets a password and signs
+  the person in (`claimed: true`). The wrong account type, or an account that already has a password,
+  is still refused. **Trade-off:** there is no SMS check, so anyone who knows the phone number of a
+  still-password-less account can claim it before its owner does. Those accounts had no protection
+  at all before, and only the first claim works; an SMS code is the real fix. Old accounts that
+  do have a password (including plain-text ones) are not affected and still sign in as before.
+  There is still no password reset for accounts that have a password.
 - **No limit on login attempts.** Passwords are hashed, but nothing slows down guessing. Add rate
   limiting before a public launch.
 - **No SMS or email check.** Anyone can register any phone number; a verification code needs a
