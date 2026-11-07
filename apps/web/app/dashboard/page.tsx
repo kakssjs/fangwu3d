@@ -114,7 +114,7 @@ export default function HomeownerDashboard() {
             {projects.map(p => (
               <div key={p.id} style={{ position: 'relative' }}>
                 <a href={'/project/' + p.id} className="action-card">
-                  <div className="icon" style={{ background: 'rgba(0,229,255,0.1)', border: '1px solid var(--border)' }}>⌂</div>
+                  <div className="icon" style={{ background: 'var(--accent-soft)', border: '1px solid var(--border)' }}>⌂</div>
                   <h3>{p.name}</h3>
                   <p>{p.style} · {p.stage >= 3 ? '发布 · 竞标 · 匹配' : '智能体设计中'}</p>
                 </a>
@@ -124,7 +124,7 @@ export default function HomeownerDashboard() {
                       className="btn"
                       disabled={delBusy}
                       onClick={() => void confirmDelete(p.id)}
-                      style={{ fontSize: 11, padding: '3px 10px', background: 'rgba(255,77,96,0.18)', border: '1px solid rgba(255,77,96,0.5)', color: '#ff6b7a' }}
+                      style={{ fontSize: 11, padding: '3px 10px', background: 'var(--bad-bg)', border: '1px solid #f1c4bf', color: 'var(--accent-danger)' }}
                     >
                       {delBusy ? '删除中…' : '确认删除'}
                     </button>

@@ -1,18 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getUser } from '@i-renovation/shared';
+import { requireSession } from '@/lib/auth';
 
+// 当前登录用户（来自签名 Cookie，不接受页面传来的 id）
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const idParam = searchParams.get('id');
-    const id = Number(idParam);
-    if (!idParam || Number.isNaN(id)) {
-      return NextResponse.json({ error: '缺少有效的 id 参数' }, { status: 400 });
-    }
+    const s = await requireSession(req);
+    if (s instanceof NextResponse) return s;
+    if (s.role === 'boss') return NextResponse.json({ id: 0, role: 'boss', name: '平台老板' });
 
-    const user = await getUser(id);
+    const user = await getUser(s.uid);
     if (!user) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
-
     const { passwordHash: _passwordHash, ...safe } = user;
     return NextResponse.json(safe);
   } catch {

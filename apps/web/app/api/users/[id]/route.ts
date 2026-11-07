@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getUser, updateCompanyProfile } from '@i-renovation/shared';
+import { forbidden, requireSession } from '@/lib/auth';
 
 // 装修队补充/更新资质材料（更新后重置为待审核，由老板人工审核）
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const s = await requireSession(req, ['company']); if (s instanceof NextResponse) return s;
     const id = Number((await ctx.params).id);
     if (!Number.isFinite(id)) return NextResponse.json({ error: '缺少有效的 id' }, { status: 400 });
+    if (id !== s.uid) return forbidden();
 
     const user = await getUser(id);
     if (!user) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
@@ -35,10 +38,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const s = await requireSession(req); if (s instanceof NextResponse) return s;
     const id = Number((await ctx.params).id);
     if (!Number.isFinite(id)) return NextResponse.json({ error: '缺少有效的 id' }, { status: 400 });
+    if (s.role !== 'boss' && id !== s.uid) return forbidden();
     const user = await getUser(id);
     if (!user) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
     const { passwordHash: _ph, ...safe } = user;

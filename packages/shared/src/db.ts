@@ -332,6 +332,12 @@ export async function updateCompanyProfile(id: number, patch: Partial<{
   await db.update(users).set({ ...patch, verified: 0 }).where(and(eq(users.id, id), eq(users.role, 'company')));
 }
 
+/** 保存密码哈希（登录时把旧的明文密码升级为哈希） */
+export async function setUserPasswordHash(id: number, passwordHash: string) {
+  const db = await getDb();
+  await db.update(users).set({ passwordHash }).where(eq(users.id, id));
+}
+
 // ---- Orders ----
 export async function createOrder(o: {
   projectId: number; homeownerId: number; status?: string;

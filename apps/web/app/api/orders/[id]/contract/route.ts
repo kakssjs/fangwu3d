@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createContract, getContractByOrder, signContract, getOrder, getProject, getUser } from '@i-renovation/shared';
+import { createContract, getContractByOrder, signContract, getOrder, getProject, getUser, updateOrder } from '@i-renovation/shared';
+import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 function buildContractText(params: {
   projectName: string;
@@ -66,24 +67,26 @@ function buildContractText(params: {
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const s = await requireSession(req, ['homeowner', 'company']); if (s instanceof NextResponse) return s;
     const id = Number((await ctx.params).id);
     if (!Number.isFinite(id)) return NextResponse.json({ error: '缺少有效的 id' }, { status: 400 });
 
     const order = await getOrder(id);
     if (!order) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
+    if (!isOrderParty(s, order)) return forbidden();
 
     const body = (await req.json().catch(() => ({}))) as { signer?: string };
-    const signer = body.signer;
-
-    // 签署合同
-    if (signer !== undefined) {
-      if (signer !== 'homeowner' && signer !== 'company') {
-        return NextResponse.json({ error: "signer 必须为 'homeowner' 或 'company'" }, { status: 400 });
-      }
+    // 签署合同：签署方 = 登录身份；请求里的 signer 只表示这是一次签署请求
+    if (body.signer !== undefined) {
+      const signer = s.role as 'homeowner' | 'company';
       const contract = await getContractByOrder(id);
       if (!contract) return NextResponse.json({ error: '合同不存在，请先创建合同' }, { status: 404 });
       await signContract(contract.id, signer);
       const updated = await getContractByOrder(id);
+      // 双方都签署后，订单进入「已签约」
+      if (updated && updated.homeownerSigned === 1 && updated.companySigned === 1 && order.status !== 'contracted') {
+        await updateOrder(id, { status: 'contracted', contractedAt: new Date().toISOString() });
+      }
       return NextResponse.json(updated);
     }
 
@@ -113,10 +116,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const s = await requireSession(req); if (s instanceof NextResponse) return s;
     const id = Number((await ctx.params).id);
     if (!Number.isFinite(id)) return NextResponse.json({ error: '缺少有效的 id' }, { status: 400 });
+    const order = await getOrder(id);
+    if (!order) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
+    if (!isOrderParty(s, order)) return forbidden();
 
     const contract = await getContractByOrder(id);
     if (!contract) return NextResponse.json({ error: '合同不存在' }, { status: 404 });

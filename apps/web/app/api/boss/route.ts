@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import {
   getDb, projects, tasks, results, listAllProjects, listAllTasks, listAllOrders, listCompanies, EXCEPTION_RULES,
 } from '@i-renovation/shared';
+import { requireSession } from '@/lib/auth';
 
 // 老板控制台数据聚合：任务记录 + 成本看板 + 审批队列 + 订单（第一单）
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const s = await requireSession(req, ['boss']); if (s instanceof NextResponse) return s;
     const [projectRows, taskRows, orderRows, companies] = await Promise.all([
       listAllProjects(), listAllTasks(), listAllOrders(), listCompanies(),
     ]);

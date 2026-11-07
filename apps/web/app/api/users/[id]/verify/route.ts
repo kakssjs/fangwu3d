@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getUser, setUserVerified } from '@i-renovation/shared';
+import { requireSession } from '@/lib/auth';
 
 // ★ 资质审核 = 红线动作：仅老板人工决策，Agent 不得代为认证
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const s = await requireSession(req, ['boss']); if (s instanceof NextResponse) return s;
     const id = Number((await ctx.params).id);
     if (!Number.isFinite(id)) return NextResponse.json({ error: '缺少有效的 id' }, { status: 400 });
 

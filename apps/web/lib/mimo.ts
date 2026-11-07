@@ -29,7 +29,7 @@ function httpsPost(url: string, body: Record<string, unknown>, headers: Record<s
   });
 }
 
-export async function callMimo(messages: ChatMessage[], opts?: { imageBase64?: string; mime?: string }): Promise<{ text: string; tokensUsed: number }> {
+export async function callMimo(messages: ChatMessage[], opts?: { imageBase64?: string; mime?: string; maxTokens?: number; noThinking?: boolean }): Promise<{ text: string; tokensUsed: number }> {
   const base = process.env.MIMO_BASE_URL;
   const key = process.env.MIMO_API_KEY;
   if (!base || !key) throw new Error('MIMO_BASE_URL / MIMO_API_KEY not configured');
@@ -45,7 +45,9 @@ export async function callMimo(messages: ChatMessage[], opts?: { imageBase64?: s
   const body = {
     model: 'mimo-v2.6-pro',
     messages: [...messages.slice(0, -1), { role: 'user', content }],
-    max_tokens: 2000,
+    max_tokens: opts?.maxTokens ?? 2000,
+    // 看图识别这类任务不需要长时间思考：关掉思考模式，约快 4 倍，且不会因思考耗尽回答长度而返回空内容
+    ...(opts?.noThinking ? { thinking: { type: 'disabled' } } : {}),
   };
 
   const res = await httpsPost(`${base}/chat/completions`, body, {

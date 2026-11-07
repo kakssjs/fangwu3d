@@ -23,6 +23,7 @@ type CompanyForm = {
   companyName: string;
   phone: string;
   email: string;
+  password: string;
   license: string;
   qualifications: string;
   districts: string;
@@ -38,7 +39,7 @@ function splitList(value: string): string[] {
 const overlayStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(0,0,0,0.7)',
+  background: 'rgba(20,28,24,0.55)',
   display: 'flex',
   alignItems: 'flex-start',
   paddingTop: '6vh',
@@ -110,6 +111,7 @@ export default function RegisterModal({
   const [doneUser, setDoneUser] = useState<RegisterUser | null>(null);
   const [hoveredCard, setHoveredCard] = useState<'homeowner' | 'company' | null>(null);
   const [loginPhone, setLoginPhone] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
 
   const [homeForm, setHomeForm] = useState<HomeownerForm>({
@@ -124,6 +126,7 @@ export default function RegisterModal({
     companyName: '',
     phone: '',
     email: '',
+    password: '',
     license: '',
     qualifications: '',
     districts: '',
@@ -181,6 +184,7 @@ export default function RegisterModal({
           companyName: coForm.companyName,
           phone: coForm.phone,
           email: coForm.email,
+          password: coForm.password,
           license: coForm.license,
           qualifications: splitList(coForm.qualifications),
           districts: splitList(coForm.districts),
@@ -211,11 +215,11 @@ export default function RegisterModal({
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: loginPhone }),
+        body: JSON.stringify({ phone: loginPhone, password: loginPassword }),
       });
       const data = (await res.json()) as { id?: number; role?: string; name?: string; companyName?: string; error?: string };
       if (!res.ok || typeof data.id !== 'number') {
-        setError(data.error ?? '登录失败，请检查手机号是否已注册');
+        setError(data.error ?? '登录失败，请检查手机号和密码');
         return;
       }
       onSuccess({ id: data.id, role: data.role ?? 'homeowner', name: data.name ?? loginPhone, companyName: data.companyName });
@@ -263,7 +267,7 @@ export default function RegisterModal({
         {step === 'login' && (
           <form onSubmit={submitLogin}>
             <p style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.7, margin: '0 0 18px' }}>
-              使用注册时的手机号登录
+              使用注册时的手机号和密码登录
             </p>
             <div className="form-group">
               <label>手机号</label>
@@ -274,6 +278,18 @@ export default function RegisterModal({
                 placeholder="请输入注册手机号"
                 value={loginPhone}
                 onChange={(e) => setLoginPhone(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>密码</label>
+              <input
+                className="form-input"
+                required
+                type="password"
+                autoComplete="current-password"
+                placeholder="请输入密码"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
               />
             </div>
             {error && (
@@ -369,10 +385,13 @@ export default function RegisterModal({
               />
             </div>
             <div className="form-group">
-              <label>密码（选填）</label>
+              <label>密码 *（至少 8 位）</label>
               <input
                 className="form-input"
+                required
+                minLength={8}
                 type="password"
+                autoComplete="new-password"
                 placeholder="设置登录密码"
                 value={homeForm.password}
                 onChange={(e) => setHomeForm({ ...homeForm, password: e.target.value })}
@@ -436,6 +455,19 @@ export default function RegisterModal({
                 placeholder="请输入邮箱"
                 value={coForm.email}
                 onChange={(e) => setCoForm({ ...coForm, email: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>密码 *（至少 8 位）</label>
+              <input
+                className="form-input"
+                required
+                minLength={8}
+                type="password"
+                autoComplete="new-password"
+                placeholder="设置登录密码"
+                value={coForm.password}
+                onChange={(e) => setCoForm({ ...coForm, password: e.target.value })}
               />
             </div>
             <div className="form-group">

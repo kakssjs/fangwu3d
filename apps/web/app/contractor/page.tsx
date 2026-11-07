@@ -109,6 +109,7 @@ export default function ContractorPortal() {
   const [busy, setBusy] = useState(false);
   const [contractFor, setContractFor] = useState<number | null>(null);
   const [contractText, setContractText] = useState("");
+  const [companySigned, setCompanySigned] = useState(false);
   const projRef = useRef<Record<number, ProjectInfo | null>>({});
 
   useEffect(() => {
@@ -279,6 +280,7 @@ export default function ContractorPortal() {
       });
       const data = (await res.json().catch(() => ({}))) as {
         content?: string;
+        companySigned?: number;
         error?: string;
       };
       if (!res.ok || typeof data.content !== "string") {
@@ -287,6 +289,31 @@ export default function ContractorPortal() {
       }
       setContractFor(orderId);
       setContractText(data.content);
+      setCompanySigned(data.companySigned === 1);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signContract(orderId: number) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/orders/${orderId}/contract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signer: "company" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        companySigned?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? "签署失败");
+        return;
+      }
+      setCompanySigned(data.companySigned === 1);
+      await load();
     } finally {
       setBusy(false);
     }
@@ -568,7 +595,7 @@ export default function ContractorPortal() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.7)",
+            background: "rgba(20,28,24,0.55)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -581,9 +608,20 @@ export default function ContractorPortal() {
               <div className="accent-bar" />
               施工合同 · 订单 #{contractFor}
             </div>
-            <pre style={{ whiteSpace: "pre-wrap" }}>{contractText}</pre>
+            <pre style={{ whiteSpace: "pre-wrap", maxHeight: "55vh", overflow: "auto" }}>{contractText}</pre>
+            {companySigned ? (
+              <span className="tag tag-green">本公司已签署</span>
+            ) : (
+              <button
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => void signContract(contractFor)}
+              >
+                签署合同
+              </button>
+            )}{" "}
             <button
-              className="btn btn-primary"
+              className="btn btn-ghost"
               onClick={() => setContractFor(null)}
             >
               关闭

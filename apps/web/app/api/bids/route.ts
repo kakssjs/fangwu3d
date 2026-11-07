@@ -1,24 +1,32 @@
 import { NextResponse } from 'next/server';
-import { createBid, listBidsByOrder, getOrder, listTasks, createTask } from '@i-renovation/shared';
+import { createBid, listBidsByOrder, getOrder, getUser, listTasks, createTask } from '@i-renovation/shared';
+import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 export async function POST(req: Request) {
   try {
+    const s = await requireSession(req, ['company']); if (s instanceof NextResponse) return s;
     const body = (await req.json()) as {
-      orderId?: number; companyId?: number; companyName?: string;
+      orderId?: number; companyName?: string;
       amount?: string | number; weeks?: string | number; note?: string;
     };
 
     const orderId = Number(body.orderId);
-    const companyId = Number(body.companyId);
-    const companyName = (body.companyName ?? '').trim();
+    // 投标公司 = 登录的公司账号；公司名取账号资料，不信页面传来的
+    const companyId = s.uid;
+    const me = await getUser(s.uid);
+    const companyName = (me?.companyName ?? me?.name ?? '').trim();
     const amount = body.amount !== undefined && body.amount !== null ? String(body.amount).trim() : '';
     const weeks = body.weeks !== undefined && body.weeks !== null ? String(body.weeks).trim() : '';
 
     if (!Number.isFinite(orderId)) return NextResponse.json({ error: '缺少有效的 orderId' }, { status: 400 });
-    if (!Number.isFinite(companyId)) return NextResponse.json({ error: '缺少有效的 companyId' }, { status: 400 });
     if (!companyName) return NextResponse.json({ error: '缺少公司名称' }, { status: 400 });
     if (!amount) return NextResponse.json({ error: '缺少报价金额' }, { status: 400 });
     if (!weeks) return NextResponse.json({ error: '缺少工期' }, { status: 400 });
+
+    // 只能给公开招标中的订单投标
+    const target = await getOrder(orderId);
+    if (!target) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
+    if (target.status !== 'open') return NextResponse.json({ error: '该订单已不接受投标' }, { status: 409 });
 
     const bid = await createBid({
       orderId,
@@ -56,12 +64,19 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   try {
+    const s = await requireSession(req); if (s instanceof NextResponse) return s;
     const { searchParams } = new URL(req.url);
     const orderId = Number(searchParams.get('orderId'));
     if (!Number.isFinite(orderId)) {
       return NextResponse.json({ error: '缺少有效的 orderId 参数' }, { status: 400 });
     }
-    return NextResponse.json(await listBidsByOrder(orderId));
+    const order = await getOrder(orderId);
+    if (!order) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
+    const bids = await listBidsByOrder(orderId);
+    // 业主和老板看全部报价；公司只能看自己的，看不到竞争对手的报价
+    if (s.role === 'company') return NextResponse.json(bids.filter(b => b.companyId === s.uid));
+    if (!isOrderParty(s, order)) return forbidden();
+    return NextResponse.json(bids);
   } catch {
     return NextResponse.json({ error: '查询报价失败' }, { status: 400 });
   }

@@ -60,12 +60,18 @@ export default function BossConsole() {
   const [data, setData] = useState<BossData | null>(null);
   const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [filterAgent, setFilterAgent] = useState<string>('all');
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
-    const load = () => fetch('/api/boss').then(r => r.json()).then(setData).catch(() => {});
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const load = () => fetch('/api/boss').then(async r => {
+      // 未登录或不是老板账号：停止轮询，显示提示
+      if (r.status === 401 || r.status === 403) { setDenied(true); clearInterval(timer); return; }
+      setData(await r.json());
+    }).catch(() => {});
     load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, []);
 
   const costs = data?.costs;
@@ -75,6 +81,20 @@ export default function BossConsole() {
     .filter(t => filterAgent === 'all' || t.toAgent === filterAgent)
     .slice()
     .reverse();
+
+  if (denied) {
+    return (
+      <main className="container" style={{ paddingTop: 32 }}>
+        <div className="panel" style={{ maxWidth: 520, margin: '48px auto', textAlign: 'center' }}>
+          <div className="panel-title"><div className="accent-bar" />仅限老板账号</div>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '18px 0 22px' }}>
+            请用老板账号登录后查看控制台。
+          </p>
+          <a href="/" className="btn btn-primary">返回首页登录</a>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="container" style={{ paddingTop: 32 }}>
@@ -239,7 +259,7 @@ export default function BossConsole() {
                     <span>{AGENT_LABEL[a.agent] ?? a.agent} <span style={{ color: 'var(--text-dim)' }}>({a.count} 任务{a.failed ? ` · 失败 ${a.failed}` : ''})</span></span>
                     <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{a.tokens.toLocaleString()}</span>
                   </div>
-                  <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,229,255,0.08)', overflow: 'hidden' }}>
+                  <div style={{ height: 8, borderRadius: 4, background: 'var(--accent-soft)', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 4,
                       width: `${Math.max(2, (a.tokens / maxTokens) * 100)}%`,

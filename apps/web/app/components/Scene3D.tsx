@@ -8,7 +8,7 @@ interface Props {
   rooms?: PlanRoom[]; // 兜底：无几何时由房间面积现场生成
 }
 
-const ROOM_COLORS = [0x7fd8c8, 0xf0b98a, 0x9db4f0, 0xc9a6e8, 0xa8d89a, 0xf0d28a, 0x8ac6e8, 0xe8a698];
+const ROOM_COLORS = [0xc9b99a, 0xa9b8a3, 0xd9c3a5, 0x9fb3a8, 0xbfae94, 0xd6c9b0, 0xb3a48c, 0xc4b5a0];
 const WALL_COLOR = 0xd8d2c8;
 const WALL_EXTERIOR = 0xc4bcae;
 
@@ -17,15 +17,15 @@ function makeLabel(text: string, sub: string): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 96;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = 'rgba(10, 16, 30, 0.72)';
+  ctx.fillStyle = 'rgba(28, 42, 35, 0.8)';
   ctx.beginPath();
   (ctx.roundRect ?? ctx.rect).call(ctx, 8, 8, 240, 80, 14);
   ctx.fill();
-  ctx.fillStyle = '#eaf4ff';
+  ctx.fillStyle = '#f8f4ea';
   ctx.font = 'bold 30px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(text, 128, 44);
-  ctx.fillStyle = '#8fd8ff';
+  ctx.fillStyle = '#c9af83';
   ctx.font = '22px sans-serif';
   ctx.fillText(sub, 128, 74);
   const tex = new THREE.CanvasTexture(canvas);
@@ -101,8 +101,8 @@ export default function Scene3D({ geometry, rooms }: Props) {
     const H = wrap.clientHeight || 420;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0f1e);
-    scene.fog = new THREE.FogExp2(0x0a0f1e, 0.008);
+    scene.background = new THREE.Color(0x1c2a23);
+    scene.fog = new THREE.FogExp2(0x1c2a23, 0.008);
 
     const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 300);
     const target = new THREE.Vector3(plan.width / 2, 1, plan.depth / 2);
@@ -115,26 +115,26 @@ export default function Scene3D({ geometry, rooms }: Props) {
     wrap.appendChild(renderer.domElement);
 
     // 灯光
-    scene.add(new THREE.AmbientLight(0x8899cc, 0.7));
+    scene.add(new THREE.AmbientLight(0xd8d2c0, 0.7));
     const sun = new THREE.DirectionalLight(0xfff2dd, 1.4);
     sun.position.set(plan.width, 22, plan.depth * 0.6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     scene.add(sun);
-    const fill = new THREE.PointLight(0x00e5ff, 0.9, 60);
+    const fill = new THREE.PointLight(0xe6d2a8, 0.9, 60);
     fill.position.set(plan.width / 2, 10, plan.depth / 2);
     scene.add(fill);
 
     // 地面 + 网格
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(plan.width * 3, plan.depth * 3),
-      new THREE.MeshStandardMaterial({ color: 0x0c1225, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x22332a, roughness: 0.95 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(plan.width / 2, -0.08, plan.depth / 2);
     ground.receiveShadow = true;
     scene.add(ground);
-    const grid = new THREE.GridHelper(Math.max(plan.width, plan.depth) * 2.4, 30, 0x1a2844, 0x121c33);
+    const grid = new THREE.GridHelper(Math.max(plan.width, plan.depth) * 2.4, 30, 0x3a4c40, 0x2a3a30);
     grid.position.set(plan.width / 2, -0.06, plan.depth / 2);
     scene.add(grid);
 
@@ -250,7 +250,7 @@ export default function Scene3D({ geometry, rooms }: Props) {
 
   return (
     <div style={{ position: 'relative' }}>
-      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 5, display: 'flex', gap: 8 }}>
+      <div className="scene3d-toggle" style={{ position: 'absolute', top: 12, right: 12, zIndex: 5, display: 'flex', gap: 8 }}>
         <button
           onClick={() => setView('persp')}
           className={`btn ${view === 'persp' ? 'btn-primary' : 'btn-ghost'}`}

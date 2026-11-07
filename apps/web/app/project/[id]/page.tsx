@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState, use, Suspense, lazy, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
-import type { PlanGeometry, PlanRoom } from '@i-renovation/shared/plan';
-import FloorPlanStudio, { type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
+import { describeRoomLayout, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
+import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
 import { agentOf } from '@/lib/agents';
 
@@ -29,6 +29,30 @@ interface DecorationImage {
   prompt: string;
   url?: string;
   b64?: string;
+  /** 该房间的版面描述（门窗位置，来自户型几何），重新生成和对话修改时都带上，保持和图纸一致 */
+  layout?: string;
+  /** 这个房间之前生成过的版本（不含当前图），旧的在前 */
+  history?: DecorationVersion[];
+}
+
+interface DecorationVersion {
+  prompt: string;
+  url?: string;
+  b64?: string;
+}
+
+const MAX_HISTORY = 20;
+
+/** 新图成为当前图时，把原来的当前图放进历史（只保留最近 MAX_HISTORY 个）。 */
+function withHistory(next: DecorationImage, prev?: DecorationImage): DecorationImage {
+  const history = [...(prev?.history ?? [])];
+  if (prev && (prev.url || prev.b64)) history.push({ prompt: prev.prompt, url: prev.url, b64: prev.b64 });
+  return { ...next, history: history.slice(-MAX_HISTORY) };
+}
+
+/** 历史缩略图下的文字：首次生成的英文提示词显示为「初始生成」，其余显示用户的修改意见。 */
+function versionLabel(prompt: string): string {
+  return prompt.startsWith('Interior decoration design photo') ? '初始生成' : prompt;
 }
 
 interface ChatMessage {
@@ -171,11 +195,19 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     if (genRoomsBusy) return;
     setGenRoomsBusy(true);
     try {
-      const M_PER_PX = 0.0125;
-      // 房间源：用户识别/手绘的房间（studioRects）优先，Agent 识别/启发式（plan.rooms）兜底
-      const rooms: { name: string; area: number }[] = studioRects.length
-        ? studioRects.map(r => ({ name: r.name, area: Math.round(r.w * r.d * M_PER_PX * M_PER_PX * 10) / 10 }))
-        : (plan?.rooms ?? []);
+      // 房间源：用户识别/手绘的房间（studioRects）优先，Agent 识别/启发式（plan.rooms）兜底。
+      // 尺寸和门窗取自与 3D 建模同一份几何，渲染图才能和图纸对得上。
+      let geom: PlanGeometry | null = null;
+      try {
+        geom = studioRects.length
+          ? geometryFromStudioRects(studioRects, Number(data!.project.area) || undefined)
+          : (plan?.geometry ?? null);
+      } catch {
+        geom = plan?.geometry ?? null;
+      }
+      const rooms: { name: string; area: number; layout: string }[] = geom
+        ? geom.rooms.map((r, i) => ({ name: r.name, area: r.area, layout: describeRoomLayout(geom!, i) }))
+        : (plan?.rooms ?? []).map(r => ({ ...r, layout: '' }));
       // 有几个房间生成几张，不设上限
       const target = rooms.filter(r => r.name && r.area > 0);
       if (target.length === 0) return;
@@ -188,7 +220,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         while (next < target.length) {
           const i = next++;
           const room = target[i];
-          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, warm lighting, realistic, high quality, architectural visualization`;
+          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization${room.layout ? '. ' + room.layout : ''}`;
+          // 同一房间重新生成时，旧图进入历史；生成失败则保留旧图
+          const prev = decorations[i]?.room === room.name ? decorations[i] : undefined;
           try {
             const res = await fetch('/api/agnes/generate', {
               method: 'POST',
@@ -196,9 +230,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               body: JSON.stringify({ prompt, size: '1K', ratio: '16:9' }),
             });
             const j = await res.json() as { url?: string; b64_json?: string };
-            imgs[i] = { room: room.name, prompt, url: j.url, b64: j.b64_json };
+            const fresh: DecorationImage = { room: room.name, prompt, layout: room.layout, url: j.url, b64: j.b64_json };
+            imgs[i] = fresh.url || fresh.b64 ? withHistory(fresh, prev) : (prev ?? fresh);
           } catch {
-            imgs[i] = { room: room.name, prompt };
+            imgs[i] = prev ?? { room: room.name, prompt, layout: room.layout };
           }
           doneCount += 1;
           setGenRoomsProgress(`${doneCount}/${target.length}`);
@@ -207,15 +242,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       await Promise.all(workers);
       setDecorations(imgs);
       if (imgs.length > 0) setSelectedIdx(0);
-      await fetch(`/api/projects/${id}/results`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind: 'decorations',
-          upsert: true,
-          content: { images: imgs, style: data!.project.style, note: `根据房型图生成的各房间渲染图（${imgs.length} 间，AI 生成）` },
-        }),
-      });
+      await persistDecorations(imgs);
     } finally {
       setGenRoomsBusy(false);
       setGenRoomsProgress('');
@@ -252,6 +279,19 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     }
   }
 
+  // 保存各房间装饰图（含历史版本），覆盖式，刷新后不丢
+  function persistDecorations(imgs: DecorationImage[]) {
+    return fetch(`/api/projects/${id}/results`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'decorations',
+        upsert: true,
+        content: { images: imgs, style: data?.project.style, note: `根据房型图生成的各房间渲染图（${imgs.length} 间，AI 生成）` },
+      }),
+    });
+  }
+
   // Chat: modify decoration image
   async function sendChat() {
     if (!chatInput.trim() || chatBusy || selectedIdx < 0) return;
@@ -270,29 +310,17 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           imageUrl: currentImg?.url || currentImg?.b64 ? (currentImg.url ?? `data:image/png;base64,${currentImg.b64}`) : undefined,
           style: data?.project.style,
           room: roomName,
+          layout: currentImg?.layout,
         }),
       });
       const json = await res.json();
       if (json.url || json.b64_json) {
-        const newImg: DecorationImage = {
-          room: roomName,
-          prompt: msg,
-          url: json.url,
-          b64: json.b64_json,
-        };
+        const newImg = withHistory({ room: roomName, prompt: msg, layout: currentImg?.layout, url: json.url, b64: json.b64_json }, currentImg);
         const nextImgs = decorations.map((d, i) => i === selectedIdx ? newImg : d);
         setDecorations(nextImgs);
         setChatMessages(prev => [...prev, { role: 'assistant', content: `已根据"${msg}"重新生成 ${roomName} 装饰图`, imageUrl: json.url || `data:image/png;base64,${json.b64_json}` }]);
         // 持久化替换结果（覆盖式，刷新后不丢）
-        void fetch(`/api/projects/${id}/results`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kind: 'decorations',
-            upsert: true,
-            content: { images: nextImgs, style: data?.project.style, note: `根据房型图生成的各房间渲染图（${nextImgs.length} 间，AI 生成）` },
-          }),
-        });
+        void persistDecorations(nextImgs);
       } else {
         setChatMessages(prev => [...prev, { role: 'assistant', content: '生成失败：' + (json.error ?? '未知错误') }]);
       }
@@ -300,6 +328,20 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       setChatMessages(prev => [...prev, { role: 'assistant', content: '网络错误，请重试' }]);
     }
     setChatBusy(false);
+  }
+
+  // 恢复某个历史版本：它成为当前图，原来的当前图进入历史（版本一个都不丢）
+  function restoreVersion(k: number) {
+    const cur = decorations[selectedIdx];
+    const chosen = cur?.history?.[k];
+    if (!cur || !chosen || chatBusy) return;
+    const restored = withHistory(
+      { room: cur.room, prompt: chosen.prompt, layout: cur.layout, url: chosen.url, b64: chosen.b64 },
+      { ...cur, history: (cur.history ?? []).filter((_, j) => j !== k) },
+    );
+    const nextImgs = decorations.map((d, i) => (i === selectedIdx ? restored : d));
+    setDecorations(nextImgs);
+    void persistDecorations(nextImgs);
   }
 
   useEffect(() => {
@@ -458,18 +500,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       if (!res.ok) return;
       const updated = (await res.json()) as ContractData;
       setContract(updated);
-      if (updated.homeownerSigned === 1 && updated.companySigned === 1 && order.status !== 'contracted') {
-        try {
-          const patchRes = await fetch('/api/orders/' + order.id, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'contracted', contractedAt: new Date().toISOString() }),
-          });
-          if (patchRes.ok) setOrder((await patchRes.json()) as OrderData);
-        } catch {
-          /* ignore */
-        }
-      }
+      // 双方签署后由服务端把订单置为已签约，这里重新读取
+      const orderRes = await fetch('/api/orders/' + order.id);
+      if (orderRes.ok) setOrder((await orderRes.json()) as OrderData);
     } catch {
       /* ignore */
     }
@@ -515,7 +548,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               className="btn"
               disabled={delBusy}
               onClick={() => void deleteProject()}
-              style={{ fontSize: 11, padding: '3px 10px', background: 'rgba(255,77,96,0.18)', border: '1px solid rgba(255,77,96,0.5)', color: '#ff6b7a' }}
+              style={{ fontSize: 11, padding: '3px 10px', background: 'var(--bad-bg)', border: '1px solid #f1c4bf', color: 'var(--accent-danger)' }}
             >
               {delBusy ? '删除中…' : '确认删除？'}
             </button>
@@ -538,12 +571,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       {waitingTasks.map(t => (
         <div key={`wait_${t.id}`} style={{
           marginTop: 16, padding: '14px 18px', borderRadius: 10,
-          background: 'rgba(255, 176, 32, 0.08)', border: '1px solid rgba(255, 176, 32, 0.35)',
+          background: 'var(--warn-bg)', border: '1px solid #f0d9a4',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
           <AgentAvatar agentKey={t.toAgent} size={40} />
           <div style={{ flex: 1, minWidth: 260 }}>
-            <b style={{ color: '#ffb020', fontSize: 13 }}>⏳ 需要您补充信息 · {agentOf(t.toAgent).name}</b>
+            <b style={{ color: 'var(--accent-warn)', fontSize: 13 }}>⏳ 需要您补充信息 · {agentOf(t.toAgent).name}</b>
             <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 4, lineHeight: 1.7 }}>
               {String(t.output?.exception?.detail ?? '')} —— {String(t.output?.ask ?? '请补充后继续')}
             </div>
@@ -556,12 +589,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       {escalatedTasks.map(t => (
         <div key={`esc_${t.id}`} style={{
           marginTop: waitingTasks.length ? 10 : 16, padding: '14px 18px', borderRadius: 10,
-          background: 'rgba(255, 77, 96, 0.08)', border: '1px solid rgba(255, 77, 96, 0.35)',
+          background: 'var(--bad-bg)', border: '1px solid #f1c4bf',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
           <AgentAvatar agentKey={t.toAgent} size={40} />
           <div style={{ flex: 1, minWidth: 260 }}>
-            <b style={{ color: '#ff4d60', fontSize: 13 }}>🔔 已升级老板裁决 · {String(t.output?.exception?.ruleName ?? '异常升级')}</b>
+            <b style={{ color: 'var(--accent-danger)', fontSize: 13 }}>🔔 已升级老板裁决 · {String(t.output?.exception?.ruleName ?? '异常升级')}</b>
             <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 4, lineHeight: 1.7 }}>
               {agentOf(t.toAgent).name}（{t.toAgent}）：{String(t.output?.exception?.detail ?? '')} —— 按红线规则 Agent 不得自行改动，已提交老板人工裁决（重跑 / 降级交付 / 通知业主）
             </div>
@@ -580,7 +613,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           }>
             <div className="pipeline-icon"><AgentAvatar agentKey={s.key} size={34} /></div>
             <span>
-              <b style={{ color: 'rgba(0, 229, 255, 0.8)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'block' }}>{agentOf(s.key).name} · {agentOf(s.key).role}</b>
+              <b style={{ color: 'var(--accent2)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'block' }}>{agentOf(s.key).name} · {agentOf(s.key).role}</b>
               {s.label}
             </span>
           </div>
@@ -673,7 +706,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <img
               src={(stdUrl ?? fpData?.stdImage ?? fpData?.image) as string}
               alt="标准房型图"
-              style={{ width: '100%', maxWidth: 820, borderRadius: 12, border: '1px solid rgba(0, 229, 255, 0.18)', display: 'block' }}
+              style={{ width: '100%', maxWidth: 820, borderRadius: 12, border: '1px solid var(--border-strong)', display: 'block' }}
             />
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
               {(stdUrl || fpData?.stdImage) ? 'AI 生成标准房型图 · 尺寸以现场量房为准' : '上传户型图 · 可在上方工作台一键标准化'}
@@ -681,7 +714,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </>
         ) : design?.svg ? (
           <>
-            <div dangerouslySetInnerHTML={{ __html: design.svg }} style={{ overflowX: 'auto', border: '1px solid rgba(0, 229, 255, 0.18)', borderRadius: 12, padding: 10 }} />
+            <div dangerouslySetInnerHTML={{ __html: design.svg }} style={{ overflowX: 'auto', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 10 }} />
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>{design.note}</p>
           </>
         ) : (
@@ -728,7 +761,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             const cur = decorations[selectedIdx];
             if (!cur) return null;
             return (
-              <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(0,229,255,0.18)', background: 'rgba(0,0,0,0.15)' }}>
+              <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-strong)', background: 'var(--bg-deep)' }}>
                 {cur.url ? (
                   <img src={cur.url} alt={cur.room} style={{ width: '100%', maxHeight: 400, objectFit: 'cover', display: 'block' }} />
                 ) : cur.b64 ? (
@@ -740,9 +773,43 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             );
           })()}
 
+          {/* 历史版本：点击缩略图恢复 */}
+          {(() => {
+            const hist = decorations[selectedIdx]?.history ?? [];
+            if (hist.length === 0) return null;
+            return (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
+                  历史版本 · {hist.length}（点击缩略图恢复）
+                </div>
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                  {hist.map((v, k) => ({ v, k })).reverse().map(({ v, k }) => (
+                    <button
+                      key={k}
+                      type="button"
+                      disabled={chatBusy}
+                      onClick={() => restoreVersion(k)}
+                      title={versionLabel(v.prompt)}
+                      style={{ flex: '0 0 auto', width: 128, padding: 0, border: '1px solid var(--border-strong)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-card)', cursor: chatBusy ? 'not-allowed' : 'pointer', textAlign: 'left' }}
+                    >
+                      {v.url || v.b64 ? (
+                        <img src={v.url ?? `data:image/png;base64,${v.b64}`} alt={versionLabel(v.prompt)} loading="lazy" style={{ width: '100%', height: 76, objectFit: 'cover', display: 'block' }} />
+                      ) : (
+                        <div style={{ height: 76, background: 'var(--bg-deep)' }} />
+                      )}
+                      <div style={{ fontSize: 11, padding: '4px 8px', color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {versionLabel(v.prompt)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* 对话修改区 */}
-          <div style={{ marginTop: 16, border: '1px solid rgba(108,92,231,0.25)', borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 14px', background: 'rgba(108,92,231,0.1)', fontSize: 12, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ marginTop: 16, border: '1px solid #e4d6bd', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', background: 'var(--accent2-soft)', fontSize: 12, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>💬 对话修改装饰图 — 当前：{decorations[selectedIdx]?.room || '选择房间'}</span>
               <span className="tag tag-purple" style={{ fontSize: 10 }}>AGNES AI</span>
             </div>
@@ -759,8 +826,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   maxWidth: '80%',
                   padding: '8px 12px',
                   borderRadius: 10,
-                  background: m.role === 'user' ? 'rgba(0,229,255,0.12)' : 'rgba(108,92,231,0.12)',
-                  border: `1px solid ${m.role === 'user' ? 'rgba(0,229,255,0.2)' : 'rgba(108,92,231,0.2)'}`,
+                  background: m.role === 'user' ? 'var(--accent-soft)' : 'var(--accent2-soft)',
+                  border: `1px solid ${m.role === 'user' ? 'var(--border-strong)' : '#e4d6bd'}`,
                   fontSize: 12.5,
                   lineHeight: 1.5,
                 }}>
@@ -775,13 +842,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               )}
             </div>
             {/* 输入框 */}
-            <div style={{ display: 'flex', gap: 8, padding: '10px 14px', borderTop: '1px solid rgba(108,92,231,0.15)' }}>
+            <div style={{ display: 'flex', gap: 8, padding: '10px 14px', borderTop: '1px solid #e4d6bd' }}>
               <input
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendChat(); } }}
                 placeholder={`修改 ${decorations[selectedIdx]?.room || '房间'} 的装饰图...`}
-                style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.15)', color: 'var(--text)', fontSize: 13, outline: 'none' }}
+                style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-deep)', color: 'var(--text)', fontSize: 13, outline: 'none' }}
                 disabled={chatBusy}
               />
               <button onClick={() => void sendChat()} disabled={chatBusy || !chatInput.trim()} className="btn btn-primary" style={{ fontSize: 12, padding: '8px 18px' }}>
@@ -816,7 +883,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               <Scene3D geometry={effGeom} rooms={effRooms} />
             </Suspense>
             {effWarnings.length > 0 && (
-              <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(240,160,60,0.08)', border: '1px solid rgba(240,160,60,0.25)', fontSize: 11, color: 'var(--text-dim)' }}>
+              <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>
                 ⚠ ForgeFloor 校验提示：{effWarnings.join('；')}
               </div>
             )}
@@ -857,14 +924,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </p>
 
           {/* 用户调价 + 最终确认（人工动作） */}
-          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: '1px solid rgba(0,229,255,0.18)', background: 'rgba(0,229,255,0.05)' }}>
+          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-strong)', background: 'var(--accent-soft)' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
               <span style={{ color: 'var(--text-dim)' }}>对报价有异议？调整</span>
               <input
                 type="number" step="1" value={adjustPct}
                 onChange={e => setAdjustPct(Number(e.target.value) || 0)}
                 disabled={!!decision}
-                style={{ width: 72, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'rgba(0,0,0,0.15)', color: 'var(--text)', outline: 'none' }}
+                style={{ width: 72, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-deep)', color: 'var(--text)', outline: 'none' }}
               />
               <span style={{ color: 'var(--text-dim)' }}>%　调整后</span>
               <strong style={{ color: 'var(--accent)', fontSize: 16 }}>
@@ -938,12 +1005,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           智能体执行日志
           <small style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', animation: 'pulse 1.5s infinite' }}>● LIVE</small>
         </div>
-        <div style={{ margin: '12px 0 18px', height: 6, borderRadius: 3, background: 'rgba(0,229,255,0.1)', overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, var(--accent), var(--accent3))', width: progress + '%', transition: 'width 0.8s ease', boxShadow: progress > 0 ? '0 0 12px rgba(0,229,255,0.5)' : 'none' }} />
+        <div style={{ margin: '12px 0 18px', height: 6, borderRadius: 3, background: 'var(--accent-soft)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, var(--accent), var(--accent3))', width: progress + '%', transition: 'width 0.8s ease', boxShadow: 'none' }} />
         </div>
         {/* 任务交接链：真实 fromAgent → toAgent（数字员工协作） */}
         {data.tasks.length > 0 && (
-          <div style={{ margin: '4px 0 18px', padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(108,92,231,0.22)', background: 'rgba(108,92,231,0.06)' }}>
+          <div style={{ margin: '4px 0 18px', padding: '12px 14px', borderRadius: 12, border: '1px solid #e4d6bd', background: 'var(--accent2-soft)' }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>🔗 任务交接链 · 数字员工协作</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               {[...data.tasks].sort((a, b) => a.id - b.id).map((t, i) => {
@@ -952,14 +1019,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 return (
                   <Fragment key={t.id}>
                     {i === 0 && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'rgba(0,0,0,0.14)', border: `1px solid ${from.color}55` }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--bg-deep)', border: `1px solid ${from.color}55` }}>
                         <AgentAvatar agentKey={t.fromAgent} size={28} />
                         <span style={{ fontSize: 12, fontWeight: 600 }}>{from.name}</span>
                         <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{from.role}</span>
                       </span>
                     )}
                     <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>→</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'rgba(0,0,0,0.14)', border: `1px solid ${to.color}55` }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--bg-deep)', border: `1px solid ${to.color}55` }}>
                       <AgentAvatar agentKey={t.toAgent} size={28} />
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{to.name}</span>
                       <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{to.role}</span>
@@ -981,7 +1048,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           const task = data.tasks.find(t => t.toAgent === s.key);
           return (
             <div key={s.key} className="timeline-item" style={{ opacity: status === 'pending' ? 0.5 : 1 }}>
-              <div className={'timeline-dot ' + (status === 'pending' ? '' : status)} style={status === 'pending' ? { background: 'rgba(125,147,184,0.3)' } : undefined} />
+              <div className={'timeline-dot ' + (status === 'pending' ? '' : status)} style={status === 'pending' ? { background: 'var(--border-strong)' } : undefined} />
               <div className="timeline-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <AgentAvatar agentKey={s.key} size={38} />
                 <div>
@@ -1034,8 +1101,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           ].map((s, i) => (
             <div key={i} style={{
               flex: '1 1 220px', padding: '12px 14px', borderRadius: 12,
-              border: `1px solid ${s.ok ? 'rgba(0,255,163,0.35)' : s.pending ? 'rgba(0,229,255,0.35)' : 'var(--border)'}`,
-              background: s.ok ? 'rgba(0,255,163,0.07)' : s.pending ? 'rgba(0,229,255,0.06)' : 'rgba(0,0,0,0.12)',
+              border: `1px solid ${s.ok ? '#bfe3d0' : s.pending ? 'var(--border-strong)' : 'var(--border)'}`,
+              background: s.ok ? 'var(--ok-bg)' : s.pending ? 'var(--accent-soft)' : 'var(--bg-deep)',
             }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: s.ok ? 'var(--accent3)' : s.pending ? 'var(--accent)' : 'var(--text-dim)' }}>
                 {s.ok ? '✓ ' : s.pending ? '● ' : '○ '}{s.label}
@@ -1064,7 +1131,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </button>
           </div>
           {showRecommend && (
-            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'rgba(108,92,231,0.10)', border: '1px solid rgba(108,92,231,0.25)', fontSize: 12, color: 'var(--text)' }}>
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--accent2-soft)', border: '1px solid #e4d6bd', fontSize: 12, color: 'var(--text)' }}>
               <span className="tag tag-purple" style={{ marginRight: 8 }}>AI 推荐</span>
               {recommended
                 ? `${recommended.name}（${recommended.score != null ? `匹配度 ${recommended.score}%` : `★${recommended.rating ?? '-'}`}）· 匹配理由：${recommended.reason}`
@@ -1104,7 +1171,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               {order.companyConfirmedAt ? (
                 <span className="tag tag-green">Company Confirmed</span>
               ) : (
-                <button onClick={() => confirmSide('company')} className="btn btn-ghost">Confirm as Company</button>
+                <span className="tag">Waiting for the company to confirm</span>
               )}
             </div>
           </div>
@@ -1121,7 +1188,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
           {contract ? (
             <div>
-              <pre style={{ maxHeight: 300, overflow: 'auto', padding: 14, background: 'rgba(0,0,0,0.2)', borderRadius: 10, fontSize: 12, whiteSpace: 'pre-wrap' }}>{contract.content}</pre>
+              <pre style={{ maxHeight: 300, overflow: 'auto', padding: 14, background: 'var(--bg-deep)', borderRadius: 10, fontSize: 12, whiteSpace: 'pre-wrap' }}>{contract.content}</pre>
               <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
                 {contract.homeownerSigned === 1 ? (
                   <span className="tag tag-green">Owner Signed</span>
@@ -1131,7 +1198,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 {contract.companySigned === 1 ? (
                   <span className="tag tag-green">Company Signed</span>
                 ) : (
-                  <button onClick={() => signContract('company')} className="btn btn-ghost">Sign as Company</button>
+                  <span className="tag">Waiting for the company to sign</span>
                 )}
               </div>
             </div>
@@ -1146,7 +1213,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
       {/* billing */}
       {order && (order.status === 'confirmed' || order.status === 'contracted') && (
-        <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 10, background: 'rgba(0,255,163,0.08)', border: '1px solid rgba(0,255,163,0.2)', fontSize: 12, color: 'var(--accent3)' }}>
+        <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 10, background: 'var(--ok-bg)', border: '1px solid #bfe3d0', fontSize: 12, color: 'var(--accent3)' }}>
           Platform fee is charged to the decoration company only. Homeowner pays nothing to the platform.
         </div>
       )}

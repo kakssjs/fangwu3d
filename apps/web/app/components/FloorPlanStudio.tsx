@@ -4,12 +4,13 @@
 // 2D 与 3D 同源：画板上的房间矩形（或 AI 识别出的矩形）就是 3D 的几何事实源
 // 框支持编辑：改名字、改大小（数值或拖拽角点/整体移动）
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { planFromRects, type PlanGeometry, type RoomRect } from '@i-renovation/shared/plan';
+import { planFromRects, type OpeningHint, type PlanGeometry, type RoomRect } from '@i-renovation/shared/plan';
 
 export interface StudioRect {
   id: number;
   x: number; y: number; w: number; d: number; // 画布像素坐标
   name: string;
+  openings?: OpeningHint[]; // 从户型图识别出的门窗（位置按比例，缩放后仍有效）
 }
 
 export interface StudioData {
@@ -17,6 +18,21 @@ export interface StudioData {
   stdImage?: string | null;   // Agnes 标准平面图（url 或 dataURL）
   rects?: StudioRect[];
   strokes?: number[][][];     // 自由画笔折线
+}
+
+/** 画布矩形 → 米制几何：优先按申报总面积校准，否则默认 80px≈1m。3D 建模与房间渲染图共用，保证尺寸一致。 */
+export function geometryFromStudioRects(rects: StudioRect[], totalArea?: number): PlanGeometry {
+  const pxArea = rects.reduce((s, r) => s + r.w * r.d, 0);
+  const mPerPx = totalArea && totalArea > 10 && pxArea > 0
+    ? Math.sqrt(totalArea / pxArea)
+    : M_PER_PX;
+  const rooms: RoomRect[] = rects.map(r => ({
+    name: r.name,
+    x: r.x * mPerPx, y: r.y * mPerPx,
+    w: r.w * mPerPx, d: r.d * mPerPx,
+    openings: r.openings,
+  }));
+  return planFromRects(rooms);
 }
 
 const CANVAS_W = 820;
@@ -39,6 +55,20 @@ function compressCanvas(canvas: HTMLCanvasElement): string {
   const jpeg = off.toDataURL('image/jpeg', 0.82);
   const png = off.toDataURL('image/png');
   return jpeg.length <= png.length ? jpeg : png;
+}
+
+const SIDE_LABEL: Record<OpeningHint['side'], string> = { N: '上', E: '右', S: '下', W: '左' };
+
+/** 门窗在画布上的线段：沿所在的边，长度按宽度比例（至少 14px 才看得见） */
+function openingSegment(r: StudioRect, h: OpeningHint) {
+  const horizontal = h.side === 'N' || h.side === 'S';
+  const start = horizontal ? r.x : r.y;
+  const span = horizontal ? r.w : r.d;
+  const len = Math.max(14, h.size * span);
+  const center = start + h.pos * span;
+  const a = Math.max(start, center - len / 2), b = Math.min(start + span, center + len / 2);
+  const line = h.side === 'N' ? r.y : h.side === 'S' ? r.y + r.d : h.side === 'W' ? r.x : r.x + r.w;
+  return horizontal ? { x1: a, y1: line, x2: b, y2: line } : { x1: line, y1: a, x2: line, y2: b };
 }
 
 type DragState =
@@ -71,6 +101,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
   const [stdImage, setStdImage] = useState<string | null>(null);
   const [busy, setBusy] = useState<'' | 'agnes' | 'recognize' | 'apply' | 'save'>('');
   const [msg, setMsg] = useState('');
+  const [activeOpening, setActiveOpening] = useState<{ id: number; idx: number } | null>(null);
 
   // 恢复已保存的户型输入（仅一次，避免2s轮询冲掉编辑中状态）
   useEffect(() => {
@@ -130,29 +161,50 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
 
     // 房间矩形 + 标签 + 角点手柄
     for (const r of rects) {
-      ctx.fillStyle = 'rgba(0, 229, 255, 0.12)';
-      ctx.strokeStyle = '#0aa2b8';
+      ctx.fillStyle = 'rgba(60, 88, 75, 0.12)';
+      ctx.strokeStyle = '#3c584b';
       ctx.lineWidth = 2.5;
       ctx.fillRect(r.x, r.y, r.w, r.d);
       ctx.strokeRect(r.x, r.y, r.w, r.d);
       const cx = r.x + r.w / 2, cy = r.y + r.d / 2;
-      ctx.fillStyle = '#204048';
+      ctx.fillStyle = '#282d29';
       ctx.font = 'bold 15px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(r.name, cx, cy - 3);
       ctx.font = '11px sans-serif';
-      ctx.fillStyle = '#5b7a82';
+      ctx.fillStyle = '#6d746e';
       const mw = (r.w * M_PER_PX).toFixed(1), md = (r.d * M_PER_PX).toFixed(1);
       ctx.fillText(`${mw}×${md}m`, cx, cy + 14);
       // 四角手柄（可拖拽改大小）
-      ctx.fillStyle = '#0aa2b8';
+      ctx.fillStyle = '#3c584b';
       for (const [hx, hy] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.d], [r.x + r.w, r.y + r.d]]) {
         ctx.fillRect(hx - 4, hy - 4, 8, 8);
       }
     }
-  }, [rects, strokes]);
+
+    // 门窗：蓝色是窗，橙色是门；列表里指向某一项时加红色外框
+    ctx.lineCap = 'butt';
+    for (const r of rects) {
+      (r.openings ?? []).forEach((h, i) => {
+        const seg = openingSegment(r, h);
+        if (activeOpening && activeOpening.id === r.id && activeOpening.idx === i) {
+          ctx.strokeStyle = '#d6336c';
+          ctx.lineWidth = 12;
+          ctx.beginPath(); ctx.moveTo(seg.x1, seg.y1); ctx.lineTo(seg.x2, seg.y2); ctx.stroke();
+        }
+        ctx.strokeStyle = h.type === 'window' ? '#2f6fd0' : '#c8762f';
+        ctx.lineWidth = 7;
+        ctx.beginPath(); ctx.moveTo(seg.x1, seg.y1); ctx.lineTo(seg.x2, seg.y2); ctx.stroke();
+      });
+    }
+  }, [rects, strokes, activeOpening]);
 
   useEffect(() => { redraw(); }, [redraw]);
+
+  /** 修改某个房间的门窗列表（识别结果可能有误，用户可检查、改、删、加） */
+  function editOpenings(id: number, fn: (list: OpeningHint[]) => OpeningHint[]) {
+    setRects(prev => prev.map(r => (r.id === id ? { ...r, openings: fn(r.openings ?? []) } : r)));
+  }
 
   function canvasPos(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current!;
@@ -217,7 +269,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
       ctx.stroke();
     } else if (d.mode === 'draw-rect') {
       redraw();
-      ctx.strokeStyle = '#0aa2b8';
+      ctx.strokeStyle = '#3c584b';
       ctx.lineWidth = 2.5;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(d.startX, d.startY, x - d.startX, y - d.startY);
@@ -336,16 +388,21 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: src }),
       });
-      const json = await res.json() as { rooms?: { name: string; x: number; y: number; w: number; d: number }[]; error?: string };
+      const json = await res.json() as { rooms?: { name: string; x: number; y: number; w: number; d: number; openings?: OpeningHint[] }[]; runs?: number; error?: string };
       if (!json.rooms?.length) { setMsg('识别失败：' + (json.error ?? '未识别出房间')); return; }
       const mapped: StudioRect[] = json.rooms.map(r => ({
         id: nextId.current++,
         x: r.x * CANVAS_W, y: r.y * CANVAS_H,
         w: r.w * CANVAS_W, d: r.d * CANVAS_H,
         name: r.name,
+        openings: r.openings,
       }));
       setRects(mapped);
-      setMsg(`已识别 ${mapped.length} 个房间 — 可编辑名字/大小后生成渲染图与 3D`);
+      const openingCount = mapped.reduce((n, r) => n + (r.openings?.length ?? 0), 0);
+      const doubtful = mapped.reduce((n, r) => n + (r.openings ?? []).filter(o => o.conf !== undefined && o.conf < 1).length, 0);
+      setMsg(`已识别 ${mapped.length} 个房间、${openingCount} 处门窗（${json.runs && json.runs > 1 ? `${json.runs} 次识别取多数一致` : '仅 1 次识别，未经互相印证'}）`
+        + (doubtful ? `，其中 ${doubtful} 处只有部分识别看到、标了「待核对」，请对照图纸检查` : '')
+        + ' — 可编辑名字/大小后生成渲染图与 3D');
     } catch {
       setMsg('网络错误，识别失败');
     }
@@ -356,17 +413,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     if (rects.length === 0) { setMsg('请先框出或识别房间'); return; }
     setBusy('apply');
     try {
-      // 像素 → 米：优先按申报总面积校准，否则默认 80px≈1m
-      const pxArea = rects.reduce((s, r) => s + r.w * r.d, 0);
-      const mPerPx = totalArea && totalArea > 10 && pxArea > 0
-        ? Math.sqrt(totalArea / pxArea)
-        : M_PER_PX;
-      const rooms: RoomRect[] = rects.map(r => ({
-        name: r.name,
-        x: r.x * mPerPx, y: r.y * mPerPx,
-        w: r.w * mPerPx, d: r.d * mPerPx,
-      }));
-      const geometry = planFromRects(rooms);
+      const geometry = geometryFromStudioRects(rects, totalArea);
       onApply?.(geometry);
       setMsg(`已按此户型图生成 3D：开间 ${geometry.width}m × 进深 ${geometry.depth}m，${geometry.walls.length} 面墙${geometry.warnings.length ? `，${geometry.warnings.length} 条提示` : ''}`);
     } catch (err) {
@@ -408,7 +455,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
         </button>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
-        <span style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.12)' }} />
+        <span style={{ width: 1, height: 22, background: 'var(--border-strong)' }} />
         <button className={tool === 'rect' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '5px 12px' }}
           onClick={() => setTool('rect')}>▭ 框房间（可拖动/调角）</button>
         <button className={tool === 'pen' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '5px 12px' }}
@@ -429,7 +476,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
         onPointerUp={onPointerUp}
         style={{
           width: '100%', maxWidth: CANVAS_W, borderRadius: 12, display: 'block',
-          border: '1px solid rgba(0, 229, 255, 0.18)', cursor: 'crosshair',
+          border: '1px solid var(--border-strong)', cursor: 'crosshair',
           touchAction: 'none', background: '#fdfcf9',
         }}
       />
@@ -440,32 +487,101 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
           {rects.map(r => (
             <div key={r.id} style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '5px 10px', borderRadius: 8, background: 'rgba(0,229,255,0.08)', fontSize: 12, flexWrap: 'wrap',
+              padding: '5px 10px', borderRadius: 8, background: 'var(--accent-soft)', fontSize: 12, flexWrap: 'wrap',
             }}>
               <input
                 value={r.name}
                 onChange={e => renameRect(r.id, e.target.value)}
-                style={{ width: 62, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 5px' }}
+                style={{ width: 62, background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 5px' }}
               />
               <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>宽</span>
               <input
                 type="number" step="0.1" min="0.3"
                 value={(r.w * M_PER_PX).toFixed(1)}
                 onChange={e => resizeRect(r.id, 'w', Number(e.target.value) || 0.3)}
-                style={{ width: 46, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 4px' }}
+                style={{ width: 46, background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 4px' }}
               />
               <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>深</span>
               <input
                 type="number" step="0.1" min="0.3"
                 value={(r.d * M_PER_PX).toFixed(1)}
                 onChange={e => resizeRect(r.id, 'd', Number(e.target.value) || 0.3)}
-                style={{ width: 46, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(0,229,255,0.2)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 4px' }}
+                style={{ width: 46, background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, color: 'inherit', outline: 'none', padding: '2px 4px' }}
               />
               <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>m</span>
               <button onClick={() => setRects(prev => prev.filter(x => x.id !== r.id))}
                 style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 12 }}>✕</button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 门窗：识别结果，可检查和修改 */}
+      {rects.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            门窗 <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>
+              · 图上蓝色是窗、橙色是门。AI 识别可能有错，请对照图纸检查，多的删掉、缺的补上
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 10 }}>
+            {rects.map(r => (
+              <div key={r.id} style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--accent-soft)', fontSize: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <b>{r.name}</b>
+                  <span style={{ flex: 1 }} />
+                  <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={() => editOpenings(r.id, l => [...l, { type: 'window', side: 'N', pos: 0.5, size: 0.25 }])}>+ 窗</button>
+                  <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={() => editOpenings(r.id, l => [...l, { type: 'door', side: 'S', pos: 0.5, size: 0.15 }])}>+ 门</button>
+                </div>
+                {(r.openings ?? []).length === 0 && (
+                  <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>没有门窗记录</div>
+                )}
+                {(r.openings ?? []).map((h, i) => {
+                  const spanM = (h.side === 'N' || h.side === 'S' ? r.w : r.d) * M_PER_PX;
+                  // 用户改过就算确认了；conf 缺省表示可信
+                  const set = (patch: Partial<OpeningHint>) => editOpenings(r.id, l => l.map((o, j) => (j === i ? { ...o, ...patch, conf: 1 } : o)));
+                  const doubtful = h.conf !== undefined && h.conf < 1;
+                  return (
+                    <div key={i}
+                      onMouseEnter={() => setActiveOpening({ id: r.id, idx: i })}
+                      onMouseLeave={() => setActiveOpening(null)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                      {doubtful ? (
+                        <button type="button" title="只有部分识别看到了这一处。点这里表示已对照图纸确认"
+                          onClick={() => set({})}
+                          style={{ background: 'var(--warn-bg)', border: '1px solid #f0d9a4', color: 'var(--accent-warn)', borderRadius: 5, fontSize: 10, padding: '1px 5px', cursor: 'pointer', whiteSpace: 'nowrap' }}>待核对 ✓</button>
+                      ) : null}
+                      <select value={h.type} onChange={e => set({ type: e.target.value as OpeningHint['type'] })}
+                        style={{ background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, padding: '2px 3px' }}>
+                        <option value="window">窗</option>
+                        <option value="door">门</option>
+                      </select>
+                      <select value={h.side} onChange={e => set({ side: e.target.value as OpeningHint['side'] })}
+                        style={{ background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, padding: '2px 3px' }}>
+                        {(['N', 'E', 'S', 'W'] as const).map(sd => <option key={sd} value={sd}>{SIDE_LABEL[sd]}墙</option>)}
+                      </select>
+                      <input type="range" min={0} max={100} value={Math.round(h.pos * 100)}
+                        onChange={e => set({ pos: Number(e.target.value) / 100 })}
+                        style={{ flex: 1, minWidth: 60 }} aria-label="沿墙位置" />
+                      <input type="number" step="0.1" min="0.4" max="2.4"
+                        value={(h.size * spanM).toFixed(1)}
+                        onChange={e => set({ size: Math.min(0.9, Math.max(0.05, (Number(e.target.value) || 0.4) / spanM)) })}
+                        style={{ width: 44, background: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: 5, padding: '2px 4px' }} />
+                      <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>m</span>
+                      <button type="button" aria-label="删除这个门窗"
+                        onClick={() => { editOpenings(r.id, l => l.filter((_, j) => j !== i)); setActiveOpening(null); }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 8 }}>
+            只要有一处门窗记录，3D 和渲染图就以这里的记录为准；全部删光则按规则自动开门窗。改完后点「保存」，再点「按此图生成 3D」。
+          </p>
         </div>
       )}
 

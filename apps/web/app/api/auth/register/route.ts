@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createUser, getUserByPhone } from '@i-renovation/shared';
+import { MIN_PASSWORD, checkBossLogin, hashPassword, setSessionCookie } from '@/lib/auth';
 
 type RegisterBody = {
   role?: string;
@@ -27,10 +28,18 @@ export async function POST(req: Request) {
     const name = (body.name ?? '').trim();
     const phone = (body.phone ?? '').trim();
     const email = body.email?.trim() || undefined;
-    const password = body.password?.trim() || undefined;
+    const password = body.password ?? '';
 
     if (!name) return NextResponse.json({ error: '请填写姓名' }, { status: 400 });
     if (!phone) return NextResponse.json({ error: '请填写手机号' }, { status: 400 });
+    if (password.length < MIN_PASSWORD) {
+      return NextResponse.json({ error: `请设置至少 ${MIN_PASSWORD} 位的登录密码` }, { status: 400 });
+    }
+    // 老板账号的手机号不能被注册成普通账号
+    if (checkBossLogin(phone, '') !== null) {
+      return NextResponse.json({ error: '该手机号已注册，请直接登录' }, { status: 409 });
+    }
+    const passwordHash = hashPassword(password);
 
     // 防止重复注册：同一手机号只能注册一次
     const existing = await getUserByPhone(phone);
@@ -44,9 +53,11 @@ export async function POST(req: Request) {
         name,
         phone,
         email,
-        passwordHash: password,
+        passwordHash,
       });
-      return NextResponse.json({ id: user.id, role: user.role });
+      const res = NextResponse.json({ id: user.id, role: user.role });
+      setSessionCookie(res, user.id, 'homeowner');
+      return res;
     }
 
     // role === 'company'
@@ -58,7 +69,7 @@ export async function POST(req: Request) {
       name,
       phone,
       email,
-      passwordHash: password,
+      passwordHash,
       companyName,
       license: body.license?.trim() || undefined,
       qualifications: body.qualifications,
@@ -66,7 +77,9 @@ export async function POST(req: Request) {
       serviceTypes: body.serviceTypes,
       specialties: body.specialties,
     });
-    return NextResponse.json({ id: user.id, role: user.role });
+    const res = NextResponse.json({ id: user.id, role: user.role });
+    setSessionCookie(res, user.id, 'company');
+    return res;
   } catch {
     return NextResponse.json({ error: '注册失败' }, { status: 400 });
   }
