@@ -20,6 +20,8 @@ type HomeownerForm = {
 
 type CompanyForm = {
   name: string;
+  companyScale: 'small' | 'medium' | 'large' | 'enterprise';
+  membershipTier: 'basic' | 'professional' | 'elite';
   companyName: string;
   phone: string;
   email: string;
@@ -123,6 +125,8 @@ export default function RegisterModal({
 
   const [coForm, setCoForm] = useState<CompanyForm>({
     name: '',
+    companyScale: 'small',
+    membershipTier: 'basic',
     companyName: '',
     phone: '',
     email: '',
@@ -190,6 +194,8 @@ export default function RegisterModal({
           districts: splitList(coForm.districts),
           serviceTypes: splitList(coForm.serviceTypes),
           specialties: splitList(coForm.specialties),
+          companyScale: coForm.companyScale,
+          membershipTier: coForm.membershipTier,
         }),
       });
       const data = (await res.json()) as { id?: number; role?: string; error?: string };
@@ -198,7 +204,7 @@ export default function RegisterModal({
         return;
       }
       setDoneUser({ id: data.id, role: data.role, name: coForm.name });
-      setDoneMessage('入驻申请已提交，平台审核通过后即可接单');
+      setDoneMessage('入驻申请已提交。开通会员套餐并完成入驻费支付后，即可获取平台客户资源并参与项目竞价。');
       setStep('done');
     } catch {
       setError('网络异常，请稍后重试');
@@ -416,6 +422,35 @@ export default function RegisterModal({
 
         {step === 'company' && (
           <form onSubmit={submitCompany}>
+            <div className="form-group">
+              <label>团队规模 *</label>
+              <select
+                className="form-input"
+                value={coForm.companyScale}
+                onChange={(e) => {
+                  const companyScale = e.target.value as CompanyForm['companyScale'];
+                  const recommended = companyScale === 'small' ? 'basic' : companyScale === 'medium' ? 'professional' : 'elite';
+                  setCoForm({ ...coForm, companyScale, membershipTier: recommended });
+                }}
+              >
+                <option value="small">小型装修队 · 1–10 人</option>
+                <option value="medium">中型装潢公司 · 10–50 人</option>
+                <option value="large">大型装潢企业 · 50–200 人</option>
+                <option value="enterprise">集团型工程企业 · 200 人以上</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>入驻套餐 *</label>
+              <select
+                className="form-input"
+                value={coForm.membershipTier}
+                onChange={(e) => setCoForm({ ...coForm, membershipTier: e.target.value as CompanyForm['membershipTier'] })}
+              >
+                <option value="basic">基础入驻版 · 首年 ¥399，续费 ¥1,980/年 · 30 条客户资源/月</option>
+                <option value="professional">专业增长版 · 首年 ¥999，续费 ¥6,800/年 · 120 条客户资源/月</option>
+                <option value="elite">品牌旗舰版 · 首年 ¥2,980，续费 ¥19,800/年 · 500 条客户资源/月</option>
+              </select>
+            </div>
             <div className="form-group">
               <label>联系人姓名 *</label>
               <input

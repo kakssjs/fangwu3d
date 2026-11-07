@@ -14,6 +14,15 @@ interface OrderRecord {
   bidAmount: string | null; bidWeeks: string | null; matchScore: string | null;
   createdAt: string; contractedAt: string | null;
 }
+interface CommissionSettlement {
+  id: number; orderId: number; bidId: number; companyId: number; companyName: string;
+  revenueCny: number; estimatedCostCny: number; profitCny: number; commissionRatePct: number;
+  platformCommissionCny: number; contractorNetProfitCny: number; status: string; createdAt: string; settledAt?: string | null;
+}
+interface MembershipPayment {
+  id: number; companyId: number; companyName: string; tier: string; amountCny: number;
+  status: string; paymentReference?: string | null; createdAt: string; paidAt?: string | null;
+}
 interface BossData {
   projects: { id: number; name: string; style: string; budget: string; area: string | null; stage: number; createdAt: string }[];
   tasks: TaskRecord[];
@@ -23,6 +32,8 @@ interface BossData {
   };
   orders: OrderRecord[];
   approvals: Approval[];
+  membershipPayments?: MembershipPayment[];
+  commissionSettlements?: CommissionSettlement[];
 }
 
 const AGENT_LABEL: Record<string, string> = {
@@ -56,7 +67,8 @@ function levelTag(level: string) {
 }
 
 export default function BossConsole() {
-  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders'>('approvals');
+  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders' | 'membership' | 'commissions'>('approvals');
+  const [membershipBusy, setMembershipBusy] = useState<number | null>(null);
   const [data, setData] = useState<BossData | null>(null);
   const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [filterAgent, setFilterAgent] = useState<string>('all');
@@ -73,6 +85,36 @@ export default function BossConsole() {
     timer = setInterval(load, 3000);
     return () => clearInterval(timer);
   }, []);
+
+  async function settleCommission(settlementId: number, action: 'settle' | 'cancel') {
+    setMembershipBusy(settlementId);
+    try {
+      await fetch('/api/commissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settlementId, action }),
+      });
+      const res = await fetch('/api/boss');
+      if (res.ok) setData(await res.json());
+    } finally {
+      setMembershipBusy(null);
+    }
+  }
+
+  async function confirmMembership(paymentId: number, action: 'approve' | 'reject') {
+    setMembershipBusy(paymentId);
+    try {
+      await fetch('/api/company/membership/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentId, action }),
+      });
+      const res = await fetch('/api/boss');
+      if (res.ok) setData(await res.json());
+    } finally {
+      setMembershipBusy(null);
+    }
+  }
 
   const costs = data?.costs;
   const maxTokens = Math.max(1, ...(costs?.byAgent.map(a => a.tokens) ?? [1]));
@@ -131,6 +173,8 @@ export default function BossConsole() {
           { key: 'tasks', label: '任务记录' },
           { key: 'costs', label: '成本看板' },
           { key: 'orders', label: '订单（第一单）' },
+          { key: 'membership', label: '入驻费 / 会员' },
+          { key: 'commissions', label: '利润分成' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -275,6 +319,79 @@ export default function BossConsole() {
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 14 }}>
               每单成本 = Token 成本 + 图像生成调用 → 用于校准定价（商业化评分：单位经济）
             </p>
+          </div>
+        </>
+      )}
+
+      {/* ---------- 入驻费 / 会员 ---------- */}
+      {tab === 'membership' && (
+        <>
+          <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 14 }}>
+            装修队入驻费与会员套餐由平台线下收款或支付网关确认。确认后才会开放客户资源、竞价资格与套餐加权。
+          </p>
+          <div className="panel">
+            <table className="data-table">
+              <thead><tr><th>公司</th><th>套餐</th><th>入驻费</th><th>支付凭证</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>
+                {(data?.membershipPayments ?? []).map(p => (
+                  <tr key={p.id}>
+                    <td>{p.companyName}</td>
+                    <td>{p.tier}</td>
+                    <td>¥{p.amountCny.toLocaleString()}</td>
+                    <td>{p.paymentReference || '-'}</td>
+                    <td>{statusTag(p.status)}</td>
+                    <td>
+                      {p.status === 'pending' ? (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 10px' }} disabled={membershipBusy === p.id} onClick={() => void confirmMembership(p.id, 'approve')}>确认收款</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} disabled={membershipBusy === p.id} onClick={() => void confirmMembership(p.id, 'reject')}>驳回</button>
+                        </div>
+                      ) : p.status === 'paid' ? <span className="tag tag-green">已开通</span> : <span className="tag tag-orange">已驳回</span>}
+                    </td>
+                  </tr>
+                ))}
+                {(data?.membershipPayments ?? []).length === 0 && (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无入驻费支付记录</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ---------- 利润分成 ---------- */}
+      {tab === 'commissions' && (
+        <>
+          <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 14 }}>
+            平台按装修队项目利润的 10% 提取服务费。未填写预计成本时，暂按成交金额估算利润；实际结算时可按真实成本复核。
+          </p>
+          <div className="stats-row" style={{ marginBottom: 16 }}>
+            <div className="stat-card"><div className="label">累计利润</div><div className="value green">¥{(data?.commissionSettlements ?? []).reduce((s, x) => s + x.profitCny, 0).toLocaleString()}</div></div>
+            <div className="stat-card"><div className="label">平台 10% 分成</div><div className="value purple">¥{(data?.commissionSettlements ?? []).reduce((s, x) => s + x.platformCommissionCny, 0).toLocaleString()}</div></div>
+            <div className="stat-card"><div className="label">待结算</div><div className="value orange">{(data?.commissionSettlements ?? []).filter(x => x.status === 'pending').length}</div></div>
+          </div>
+          <div className="panel">
+            <table className="data-table">
+              <thead><tr><th>订单</th><th>装修队</th><th>成交额</th><th>预估成本</th><th>利润</th><th>平台 10%</th><th>净利</th><th>操作</th></tr></thead>
+              <tbody>
+                {(data?.commissionSettlements ?? []).map(x => (
+                  <tr key={x.id}>
+                    <td>ORDER_{x.orderId}</td><td>{x.companyName}</td>
+                    <td>¥{x.revenueCny.toLocaleString()}</td><td>¥{x.estimatedCostCny.toLocaleString()}</td>
+                    <td>¥{x.profitCny.toLocaleString()}</td><td>¥{x.platformCommissionCny.toLocaleString()}</td><td>¥{x.contractorNetProfitCny.toLocaleString()}</td>
+                    <td>{x.status === 'pending' ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 9px' }} disabled={membershipBusy === x.id} onClick={() => void settleCommission(x.id, 'settle')}>确认结算</button>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }} disabled={membershipBusy === x.id} onClick={() => void settleCommission(x.id, 'cancel')}>作废</button>
+                      </div>
+                    ) : x.status === 'settled' ? <span className="tag tag-green">已结算</span> : <span className="tag tag-orange">已作废</span>}</td>
+                  </tr>
+                ))}
+                {(data?.commissionSettlements ?? []).length === 0 && (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无利润分成记录</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </>
       )}

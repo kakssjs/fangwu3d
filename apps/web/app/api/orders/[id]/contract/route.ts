@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createContract, getContractByOrder, signContract, getOrder, getProject, getUser, updateOrder } from '@i-renovation/shared';
+import { createContract, createCommissionSettlement, getContractByOrder, signContract, getOrder, getProject, getUser, listBidsByOrder, updateOrder } from '@i-renovation/shared';
+import { calculateContractorCommission } from '@i-renovation/shared/commission';
 import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 function buildContractText(params: {
@@ -56,7 +57,8 @@ function buildContractText(params: {
     '',
     '第十条  其他约定',
     `10.1  本合同一式两份，甲乙双方各执一份，自双方签署之日起生效。`,
-    `10.2  合同签订日期：${params.signDate}`,
+    '10.2  乙方同意按本项目实际利润的 10% 向平台支付信息服务费；未提供实际成本时，暂按成交金额估算利润，结算时可复核。',
+    `10.3  合同签订日期：${params.signDate}`,
     '',
     '附件：《施工项目清单》《材料清单》《付款节点约定》《竣工验收单》',
     '',
@@ -85,6 +87,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       const updated = await getContractByOrder(id);
       // 双方都签署后，订单进入「已签约」
       if (updated && updated.homeownerSigned === 1 && updated.companySigned === 1 && order.status !== 'contracted') {
+        const bids = await listBidsByOrder(id);
+        const acceptedBid = bids.find(b => b.companyId === order.companyId) ?? bids[0];
+        if (acceptedBid && order.companyId) {
+          const commission = calculateContractorCommission({
+            amount: acceptedBid.amount,
+            estimatedCost: acceptedBid.estimatedCostCny != null ? acceptedBid.estimatedCostCny / 10000 : null,
+            amountInWan: true,
+          });
+          await createCommissionSettlement({
+            orderId: id,
+            bidId: acceptedBid.id,
+            companyId: order.companyId,
+            companyName: acceptedBid.companyName,
+            revenueCny: commission.revenueCny,
+            estimatedCostCny: commission.estimatedCostCny,
+            profitCny: commission.profitCny,
+            platformCommissionCny: commission.platformCommissionCny,
+            contractorNetProfitCny: commission.contractorNetProfitCny,
+            commissionBasis: commission.basis,
+          });
+        }
         await updateOrder(id, { status: 'contracted', contractedAt: new Date().toISOString() });
       }
       return NextResponse.json(updated);

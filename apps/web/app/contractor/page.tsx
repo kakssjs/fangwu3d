@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CONTRACTOR_MEMBERSHIP_TIERS, getMembershipTier, type MembershipTierId } from "@i-renovation/shared/membership";
+import { calculateContractorCommission, commissionLabel, type CommissionQuote } from "@i-renovation/shared/commission";
+import { explainFairBidding } from "@i-renovation/shared/fair-bidding";
 
 type PortalUser = {
   id: number;
@@ -33,9 +36,21 @@ type Bid = {
   note: string | null;
   status: string;
   createdAt: string;
+  bidRiskLevel?: string;
+  bidRiskScore?: number;
+  bidRiskReason?: string;
 };
 
-type MyBid = Bid & { projectName: string };
+type MyBid = Bid & { projectName: string; estimatedCostCny?: number; profitCny?: number; platformCommissionCny?: number; netProfitCny?: number };
+
+type MembershipProfile = {
+  companyScale?: string;
+  membershipTier?: string;
+  membershipStatus?: string;
+  membershipExpiresAt?: string;
+  monthlyLeadQuota?: number;
+  monthlyLeadsUsed?: number;
+};
 
 type ProjectInfo = {
   name: string;
@@ -93,7 +108,9 @@ function orderStatusTag(status: string) {
 export default function ContractorPortal() {
   const [user, setUser] = useState<PortalUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [tab, setTab] = useState<"projects" | "bids" | "orders">("projects");
+  const [tab, setTab] = useState<"projects" | "bids" | "orders" | "membership">("projects");
+  const [membership, setMembership] = useState<MembershipProfile | null>(null);
+  const [membershipBusy, setMembershipBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [openOrders, setOpenOrders] = useState<Order[]>([]);
@@ -106,6 +123,8 @@ export default function ContractorPortal() {
   const [bidAmount, setBidAmount] = useState("");
   const [bidWeeks, setBidWeeks] = useState("");
   const [bidNote, setBidNote] = useState("");
+  const [bidCost, setBidCost] = useState("");
+  const [commissionPreview, setCommissionPreview] = useState<CommissionQuote | null>(null);
   const [busy, setBusy] = useState(false);
   const [contractFor, setContractFor] = useState<number | null>(null);
   const [contractText, setContractText] = useState("");
@@ -168,6 +187,31 @@ export default function ContractorPortal() {
     setProjMap(next);
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then((data: unknown) => {
+        if (data && typeof data === 'object') setMembership(data as MembershipProfile);
+      })
+      .catch(() => {});
+  }, [user]);
+
+  async function applyMembership(tierId: MembershipTierId) {
+    if (membershipBusy) return;
+    setMembershipBusy(true);
+    try {
+      const res = await fetch('/api/company/membership/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tierId, companyScale: membership?.companyScale ?? 'small' }),
+      });
+      if (res.ok) setMembership(prev => ({ ...(prev ?? {}), membershipTier: tierId, membershipStatus: 'pending_payment', monthlyLeadQuota: getMembershipTier(tierId).monthlyLeadQuota, monthlyLeadsUsed: 0 }));
+    } finally {
+      setMembershipBusy(false);
+    }
+  }
+
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -223,6 +267,12 @@ export default function ContractorPortal() {
     if (user) void load();
   }, [user, load]);
 
+  function updateBidFinancials(amount: string, cost: string) {
+    setBidAmount(amount);
+    setBidCost(cost);
+    setCommissionPreview(amount.trim() ? calculateContractorCommission({ amount, estimatedCost: cost, amountInWan: true }) : null);
+  }
+
   async function submitBid(orderId: number) {
     if (!user || !bidAmount.trim() || !bidWeeks.trim()) return;
     setBusy(true);
@@ -238,6 +288,7 @@ export default function ContractorPortal() {
           amount: bidAmount.trim(),
           weeks: bidWeeks.trim(),
           note: bidNote.trim() || undefined,
+          estimatedCost: bidCost.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -334,66 +385,112 @@ export default function ContractorPortal() {
   );
 
   return (
-    <main className="container" style={{ paddingTop: 32 }}>
-      <div className="section-label" style={{ marginTop: 0 }}>
-        <h2>装潢公司 · 承接平台</h2>
-        <div className="line" />
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-dim)",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          COMPANY PORTAL v2.0
-        </span>
-      </div>
+    <main className="container" style={{ paddingTop: 24 }}>
+      <section
+        className="role-hero"
+        style={{
+          backgroundImage:
+            'url("https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1800&q=88")',
+        }}
+      >
+        <div className="role-hero-content">
+          <span className="role-kicker"><i /> CONTRACTOR NETWORK · {user?.companyName ?? user?.name ?? '装潢公司'}</span>
+          <h1 className="role-title">把好项目，交给真正能落地的团队</h1>
+          <p className="role-subtitle">
+            浏览真实装修需求，提交报价与工期，管理竞价、订单和施工合同。平台只展示脱敏项目信息，最终合作由业主决定。
+          </p>
+          <div className="role-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => setTab('projects')}
+            >
+              查看开放项目
+            </button>
+            <button
+              className="btn btn-ghost role-ghost-light"
+              onClick={() => setTab('orders')}
+            >
+              管理订单
+            </button>
+          </div>
+        </div>
+      </section>
+
       {!authChecked ? (
-        <div className="panel empty-state">
-          <p>正在校验身份...</p>
+        <div className="panel empty-state" style={{ marginTop: 18 }}>
+          <p>正在校验装修公司身份...</p>
         </div>
       ) : !user ? (
         <div
           className="panel"
-          style={{ maxWidth: 520, margin: "48px auto", textAlign: "center" }}
+          style={{ maxWidth: 560, margin: '28px auto', textAlign: 'center' }}
         >
           <div className="panel-title">
             <div className="accent-bar" />
             需要装潢公司账号
           </div>
-          <p
-            style={{
-              color: "var(--text-dim)",
-              fontSize: 13,
-              margin: "18px 0 22px",
-            }}
-          >
-            本页面仅对装潢公司开放。请先在首页注册装潢公司账号，即可浏览开放项目、参与竞价并承接订单。
+          <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '18px 0 22px', lineHeight: 1.8 }}>
+            本页面仅对装潢公司开放。注册并完成资质提交后，即可浏览开放项目、参与竞价、承接订单与签署合同。
           </p>
-          <Link href="/" className="btn btn-primary">
-            前往注册 / 登录
-          </Link>
+          <Link href="/" className="btn btn-primary">前往注册 / 登录</Link>
         </div>
       ) : (
         <>
-          <div style={{ display: "flex", gap: 8, margin: "20px 0 18px" }}>
+          <section className="role-stat-grid">
+            <div className="role-stat-card">
+              <strong>{openOrders.length}</strong>
+              <span>开放项目<br />可浏览需求并提交报价</span>
+            </div>
+            <div className="role-stat-card">
+              <strong>{myBids.length}</strong>
+              <span>我的竞价<br />查看报价、工期与审核状态</span>
+            </div>
+            <div className="role-stat-card">
+              <strong>{myOrders.length}</strong>
+              <span>合作订单<br />确认合作、合同与施工交付</span>
+            </div>
+          </section>
+
+          <div className="notice notice-ok" style={{ marginBottom: 14 }}>
+            <strong>密封竞价规则：</strong>{explainFairBidding().join('；')}
+          </div>
+
+          <div className="role-tabs">
             {(
               [
-                { key: "projects", label: "开放项目" },
-                { key: "bids", label: "我的竞价" },
-                { key: "orders", label: "订单管理" },
+                { key: 'projects', label: '开放项目' },
+                { key: 'bids', label: '我的竞价' },
+                { key: 'orders', label: '订单管理' },
               ] as const
-            ).map((t) => (
+            ).map(t => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
-                className={tab === t.key ? "btn btn-primary" : "btn btn-ghost"}
-                style={{ fontSize: 13 }}
+                className={`btn role-tab ${tab === t.key ? 'active' : ''}`}
               >
                 {t.label}
               </button>
             ))}
           </div>
+
+          <div className="role-feature-grid">
+            <div className="role-feature-card">
+              <b>01 · BID</b>
+              <h3>精准报价</h3>
+              <p>根据项目面积、风格、预算和工期要求，提交更有竞争力的施工方案。</p>
+            </div>
+            <div className="role-feature-card">
+              <b>02 · DELIVERY</b>
+              <h3>订单交付</h3>
+              <p>统一管理匹配、双方确认、合同签署与订单状态，减少沟通遗漏。</p>
+            </div>
+            <div className="role-feature-card">
+              <b>03 · TRUST</b>
+              <h3>资质与口碑</h3>
+              <p>资质由平台人工审核，匹配结果结合真实投标和公司服务能力。</p>
+            </div>
+          </div>
+
           {error && (
             <div className="tag tag-orange" style={{ marginBottom: 12 }}>
               {error}
@@ -405,8 +502,50 @@ export default function ContractorPortal() {
             </div>
           ) : (
             <>
+              {tab === "membership" && (
+                <div>
+                  <div className="panel" style={{ marginBottom: 16, background: 'linear-gradient(135deg, rgba(35,58,50,.96), rgba(88,111,98,.88))', color: '#fffdf8', border: '0' }}>
+                    <div className="panel-title" style={{ color: '#fffdf8' }}>
+                      <div className="accent-bar" />
+                      会员与客户资源
+                      <small>{getMembershipTier(membership?.membershipTier).name} · {membership?.membershipStatus === 'active' ? '已开通' : '待支付'}</small>
+                    </div>
+                    <p style={{ color: 'rgba(255,255,255,.76)', lineHeight: 1.8, margin: 0 }}>
+                      不同套餐对应不同的客户资源数量、匹配优先级和品牌曝光。装修队规模会影响推荐套餐，也可以根据业务增长升级。
+                    </p>
+                  </div>
+                  <div className="role-feature-grid">
+                    {CONTRACTOR_MEMBERSHIP_TIERS.map((tier) => {
+                      const active = membership?.membershipTier === tier.id;
+                      return (
+                        <div className="role-feature-card" key={tier.id} style={active ? { borderColor: 'var(--accent)', boxShadow: '0 16px 42px rgba(38,82,65,.12)' } : undefined}>
+                          <b>{tier.badge}</b>
+                          <h3>{tier.name}</h3>
+                          <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>首年 ¥{tier.firstYearFeeCny.toLocaleString()}</p>
+                          <p style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 8 }}>续费 ¥{tier.annualFeeCny.toLocaleString()} / 年</p>
+                          <p>{tier.benefits.slice(0, 3).join(' · ')}</p>
+                          <button
+                            className={active ? 'btn btn-ghost' : 'btn btn-primary'}
+                            disabled={membershipBusy || active}
+                            onClick={() => void applyMembership(tier.id)}
+                            style={{ marginTop: 12 }}
+                          >
+                            {active ? '当前套餐' : membership?.membershipStatus === 'pending_payment' ? '切换套餐 / 继续开通' : '申请开通'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {tab === "projects" && (
                 <>
+                  {membership?.membershipStatus !== 'active' && (
+                    <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+                      当前尚未开通有效会员。完成入驻费支付后，才能获取客户资源并参与项目竞价。
+                      <button className="btn btn-primary" style={{ marginLeft: 10, fontSize: 11, padding: '4px 10px' }} onClick={() => setTab('membership')}>查看套餐</button>
+                    </div>
+                  )}
                   {openOrders.length === 0 ? (
                     <div className="panel empty-state">
                       <p>暂无开放项目可竞价</p>
@@ -435,11 +574,14 @@ export default function ContractorPortal() {
                         {bidFor !== o.id ? (
                           <button
                             className="btn btn-ghost"
+                            disabled={membership?.membershipStatus !== 'active'}
                             onClick={() => {
                               setBidFor(o.id);
                               setBidAmount("");
                               setBidWeeks("");
                               setBidNote("");
+                              setBidCost("");
+                              setCommissionPreview(null);
                             }}
                           >
                             参与竞价 →
@@ -451,7 +593,7 @@ export default function ContractorPortal() {
                               <input
                                 className="form-input"
                                 value={bidAmount}
-                                onChange={(e) => setBidAmount(e.target.value)}
+                                onChange={(e) => updateBidFinancials(e.target.value, bidCost)}
                                 placeholder="如 18"
                               />
                             </div>
@@ -464,6 +606,20 @@ export default function ContractorPortal() {
                                 placeholder="如 12"
                               />
                             </div>
+                            <div className="form-group">
+                              <label>预计项目成本（万元，用于利润分成）</label>
+                              <input
+                                className="form-input"
+                                value={bidCost}
+                                onChange={(e) => updateBidFinancials(bidAmount, e.target.value)}
+                                placeholder="如 12.5"
+                              />
+                            </div>
+                            {commissionPreview && (
+                              <div className="notice notice-ok" style={{ marginBottom: 10, fontSize: 12 }}>
+                                {commissionLabel(commissionPreview)}
+                              </div>
+                            )}
                             <div className="form-group">
                               <label>备注说明</label>
                               <textarea
@@ -524,6 +680,11 @@ export default function ContractorPortal() {
                               <td>{b.projectName}</td>
                               <td>{b.amount}万</td>
                               <td>{b.weeks} 周</td>
+                              <td>¥{(b.estimatedCostCny ?? 0).toLocaleString()}</td>
+                              <td>¥{(b.profitCny ?? 0).toLocaleString()}</td>
+                              <td>¥{(b.platformCommissionCny ?? 0).toLocaleString()}</td>
+                              <td>¥{(b.netProfitCny ?? 0).toLocaleString()}</td>
+                              <td>{b.bidRiskLevel === 'low_ball' ? <span className="tag tag-orange">低价风险</span> : b.bidRiskLevel === 'high_ball' ? <span className="tag tag-orange">价格偏高</span> : <span className="tag tag-green">合理</span>}</td>
                               <td>{bidStatusTag(b.status)}</td>
                               <td>{b.createdAt.slice(0, 10)}</td>
                             </tr>

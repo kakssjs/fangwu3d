@@ -8,6 +8,7 @@ import {
   claimNextTask, createTask, finishTask, failTask, escalateTask, waitingTask, upsertResult, getProject, getResult, listTasks,
   calcQuote, generatePlanGeometry, planFromRects, planToSvg, listCompanies, getOrderByProject, listBidsByOrder, CORE_CHAIN, EXCEPTION_RULES,
   classifyException, exceptionInfo, buildSceneModel, validateSceneModel, describeMaterialPreset,
+  getMembershipTier, canReceiveLead, evaluateBidRisk, explainFairBidding,
   type PlanRoom, type PlanGeometry, type QuoteItem,
 } from '@i-renovation/shared';
 import { callMimo } from './mimo';
@@ -32,7 +33,8 @@ function asArray(v: unknown): string[] {
 interface CompanyRow {
   id: number; name: string; companyName?: string | null; license?: string | null;
   qualifications?: unknown; districts?: unknown; serviceTypes?: unknown; specialties?: unknown;
-  verified: number;
+  verified: number; companyScale?: string | null; membershipTier?: string | null; membershipStatus?: string | null;
+  monthlyLeadQuota?: number | null; monthlyLeadsUsed?: number | null;
 }
 
 function scoreCompany(c: CompanyRow, style: string) {
@@ -48,12 +50,15 @@ function scoreCompany(c: CompanyRow, style: string) {
   if (districts.length) { score += 15; reasons.push(`服务 ${districts.slice(0, 3).join(' / ')}`); }
   if (c.license) { score += 10; reasons.push('营业执照已备案'); }
   if (asArray(c.qualifications).length) { score += 5; reasons.push('持专业资质证书'); }
+  const tier = getMembershipTier(c.membershipTier);
+  score += tier.matchRankBoost;
+  if (tier.matchRankBoost > 0) reasons.push(`${tier.name}匹配套餐加权 +${tier.matchRankBoost}`);
   return { score: Math.min(100, score), reason: reasons.join('，') };
 }
 
 interface BidRow {
   id: number; orderId: number; companyId: number; companyName: string;
-  amount: string; weeks: string; note?: string | null;
+  amount: string; weeks: string; note?: string | null; estimatedCostCny?: number | null;
 }
 
 /** 投标匹配打分：资质档案（人工审核状态等）×0.65 + 报价/工期贴合度（真实投标数据） */
@@ -69,6 +74,11 @@ function scoreBid(c: CompanyRow | undefined, b: BidRow, style: string, quoteTota
     reasons.push('投标公司资质档案未登记');
   }
   const amount = Number(String(b.amount).replace(/[^\d.]/g, '')) || 0;
+  const amountCny = amount * 10000;
+  const risk = evaluateBidRisk(amountCny, quoteTotal, Number(b.estimatedCostCny ?? 0));
+  if (risk.level === 'low_ball') { score -= 25; reasons.push('低价风险，降低匹配优先级'); }
+  else if (risk.level === 'high_ball') { score -= 8; reasons.push('报价偏高，降低匹配优先级'); }
+  else if (risk.level === 'fair') { score += 8; reasons.push('报价处于合理区间'); }
   const weeks = Number(b.weeks) || 0;
   if (quoteTotal > 0 && amount > 0) {
     const drift = Math.abs(amount - quoteTotal) / quoteTotal;
@@ -85,6 +95,7 @@ function scoreBid(c: CompanyRow | undefined, b: BidRow, style: string, quoteTota
 interface MatchedContractor {
   id: number; bidId: number; name: string; verified: boolean; score: number;
   amount: string; weeks: string; districts: string[]; types: string[]; reason: string;
+  membershipTier: string; customerResourceLevel: string;
 }
 
 // —— 匹配智能体数据源：装修公司真实投标（发布数据）+ 公司资质档案；无投标不出匹配 ——
@@ -97,9 +108,17 @@ async function matchBids(projectId: number, style: string) {
   const quoteTotal = Number((quoteRow?.content as { total?: number } | undefined)?.total) || 0;
   const companies = (await listCompanies()) as CompanyRow[];
   const byId = new Map(companies.map(c => [c.id, c]));
-  const contractors: MatchedContractor[] = bids
+  const eligibleBids = bids.filter(b => {
+    const c = byId.get(b.companyId);
+    return c && c.membershipStatus === 'active' && canReceiveLead({
+      membershipStatus: c.membershipStatus,
+      monthlyLeadQuota: c.monthlyLeadQuota,
+      monthlyLeadsUsed: c.monthlyLeadsUsed,
+    });
+  });
+  const contractors: MatchedContractor[] = eligibleBids
     .map(b => {
-      const c = byId.get(b.companyId);
+      const c = byId.get(b.companyId)!;
       const s = scoreBid(c, b, style, quoteTotal);
       return {
         id: b.companyId, bidId: b.id, name: b.companyName,
@@ -108,11 +127,13 @@ async function matchBids(projectId: number, style: string) {
         amount: b.amount, weeks: b.weeks,
         districts: asArray(c?.districts), types: asArray(c?.serviceTypes),
         reason: s.reason,
+        membershipTier: c.membershipTier ?? 'basic',
+        customerResourceLevel: getMembershipTier(c.membershipTier).id === 'elite' ? 'high_intent' : getMembershipTier(c.membershipTier).id === 'professional' ? 'qualified' : 'standard',
       };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
-  return { order, bids, contractors };
+  return { order, bids, contractors, eligibleBidCount: eligibleBids.length, excludedUnpaidBids: bids.length - eligibleBids.length };
 }
 
 async function tryMimo(prompt: string, image?: { b64: string; mime: string }): Promise<string | null> {
@@ -280,7 +301,8 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
       const match = {
         contractors, source: 'bids', bidCount: bids.length,
         pushedAt: new Date().toISOString(),
-        note: '基于装修公司真实投标数据（报价/工期）+ 资质档案匹配（审核状态为老板人工审核结果）；仅展示脱敏信息，最终选定由业主决定',
+        note: '采用密封竞价和综合匹配：不公开竞争对手报价，不以最低价为唯一标准；综合资质、合理报价、工期、风格与服务能力，规避低价恶性竞争。',
+        fairBidding: explainFairBidding(),
       };
       await upsertResult(task.projectId, 'match', match);
       return { content: match, tokens: 0 };

@@ -64,6 +64,14 @@ export const users = pgTable('users', {
   districts: jsonb('districts'),
   serviceTypes: jsonb('service_types'),
   specialties: jsonb('specialties'),
+  companyScale: text('company_scale'),
+  membershipTier: text('membership_tier').default('basic'),
+  membershipStatus: text('membership_status').default('pending_payment'),
+  membershipExpiresAt: text('membership_expires_at'),
+  monthlyLeadQuota: integer('monthly_lead_quota').default(30),
+  monthlyLeadsUsed: integer('monthly_leads_used').default(0),
+  membershipPaidAmount: integer('membership_paid_amount').default(0),
+  membershipStartedAt: text('membership_started_at'),
   verified: integer('verified').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
@@ -94,8 +102,33 @@ export const bids = pgTable('bids', {
   amount: text('amount').notNull(),
   weeks: text('weeks').notNull(),
   note: text('note'),
+  estimatedCostCny: integer('estimated_cost_cny').default(0),
+  profitCny: integer('profit_cny').default(0),
+  platformCommissionCny: integer('platform_commission_cny').default(0),
+  netProfitCny: integer('net_profit_cny').default(0),
+  commissionBasis: text('commission_basis').default('gross_revenue'),
+  bidRiskLevel: text('bid_risk_level').default('unknown'),
+  bidRiskScore: integer('bid_risk_score').default(0),
+  bidRiskReason: text('bid_risk_reason'),
   status: text('status').notNull().default('pending'),
   createdAt: text('created_at').notNull(),
+});
+
+export const commissionSettlements = pgTable('commission_settlements', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull(),
+  bidId: integer('bid_id').notNull(),
+  companyId: integer('company_id').notNull(),
+  companyName: text('company_name').notNull(),
+  revenueCny: integer('revenue_cny').notNull(),
+  estimatedCostCny: integer('estimated_cost_cny').notNull().default(0),
+  profitCny: integer('profit_cny').notNull(),
+  commissionRatePct: integer('commission_rate_pct').notNull().default(10),
+  platformCommissionCny: integer('platform_commission_cny').notNull(),
+  contractorNetProfitCny: integer('contractor_net_profit_cny').notNull(),
+  status: text('status').notNull().default('pending'),
+  createdAt: text('created_at').notNull(),
+  settledAt: text('settled_at'),
 });
 
 export const contracts = pgTable('contracts', {
@@ -106,6 +139,18 @@ export const contracts = pgTable('contracts', {
   companySigned: integer('company_signed').notNull().default(0),
   createdAt: text('created_at').notNull(),
   signedAt: text('signed_at'),
+});
+
+export const membershipPayments = pgTable('membership_payments', {
+  id: serial('id').primaryKey(),
+  companyId: integer('company_id').notNull(),
+  companyName: text('company_name').notNull(),
+  tier: text('tier').notNull(),
+  amountCny: integer('amount_cny').notNull(),
+  status: text('status').notNull().default('pending'),
+  paymentReference: text('payment_reference'),
+  createdAt: text('created_at').notNull(),
+  paidAt: text('paid_at'),
 });
 
 const DDL = `
@@ -126,8 +171,19 @@ CREATE TABLE IF NOT EXISTS users (
   phone text, email text, password_hash text,
   company_name text, license text, qualifications jsonb,
   districts jsonb, service_types jsonb, specialties jsonb,
+  company_scale text, membership_tier text DEFAULT 'basic', membership_status text DEFAULT 'pending_payment',
+  membership_expires_at text, monthly_lead_quota integer DEFAULT 30, monthly_leads_used integer DEFAULT 0,
+  membership_paid_amount integer DEFAULT 0, membership_started_at text,
   verified integer NOT NULL DEFAULT 0, created_at text NOT NULL
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company_scale text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_tier text DEFAULT 'basic';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_status text DEFAULT 'pending_payment';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_expires_at text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_lead_quota integer DEFAULT 30;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_leads_used integer DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_paid_amount integer DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_started_at text;
 CREATE TABLE IF NOT EXISTS orders (
   id serial PRIMARY KEY, project_id integer NOT NULL, homeowner_id integer NOT NULL,
   company_id integer, status text NOT NULL DEFAULT 'open',
@@ -139,7 +195,29 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS bids (
   id serial PRIMARY KEY, order_id integer NOT NULL, company_id integer NOT NULL,
   company_name text NOT NULL, amount text NOT NULL, weeks text NOT NULL,
-  note text, status text NOT NULL DEFAULT 'pending', created_at text NOT NULL
+  note text, estimated_cost_cny integer DEFAULT 0, profit_cny integer DEFAULT 0,
+  platform_commission_cny integer DEFAULT 0, net_profit_cny integer DEFAULT 0,
+  commission_basis text DEFAULT 'gross_revenue', status text NOT NULL DEFAULT 'pending', created_at text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS commission_settlements (
+  id serial PRIMARY KEY, order_id integer NOT NULL, bid_id integer NOT NULL, company_id integer NOT NULL,
+  company_name text NOT NULL, revenue_cny integer NOT NULL, estimated_cost_cny integer DEFAULT 0,
+  profit_cny integer NOT NULL, commission_rate_pct integer DEFAULT 10,
+  platform_commission_cny integer NOT NULL, contractor_net_profit_cny integer NOT NULL,
+  status text NOT NULL DEFAULT 'pending', created_at text NOT NULL, settled_at text
+);
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS estimated_cost_cny integer DEFAULT 0;
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS profit_cny integer DEFAULT 0;
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS platform_commission_cny integer DEFAULT 0;
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS net_profit_cny integer DEFAULT 0;
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS commission_basis text DEFAULT 'gross_revenue';
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_level text DEFAULT 'unknown';
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_score integer DEFAULT 0;
+ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_reason text;
+CREATE TABLE IF NOT EXISTS membership_payments (
+  id serial PRIMARY KEY, company_id integer NOT NULL, company_name text NOT NULL,
+  tier text NOT NULL, amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
+  payment_reference text, created_at text NOT NULL, paid_at text
 );
 CREATE TABLE IF NOT EXISTS contracts (
   id serial PRIMARY KEY, order_id integer NOT NULL, content text NOT NULL,
@@ -294,6 +372,7 @@ export async function createUser(u: {
   role: string; name: string; phone?: string; email?: string; passwordHash?: string;
   companyName?: string; license?: string; qualifications?: unknown;
   districts?: unknown; serviceTypes?: unknown; specialties?: unknown;
+  companyScale?: string; membershipTier?: string; membershipStatus?: string; monthlyLeadQuota?: number;
 }) {
   const db = await getDb();
   const [row] = await db.insert(users).values({ ...u, verified: 0, createdAt: now() }).returning();
@@ -330,6 +409,65 @@ export async function updateCompanyProfile(id: number, patch: Partial<{
 }>) {
   const db = await getDb();
   await db.update(users).set({ ...patch, verified: 0 }).where(and(eq(users.id, id), eq(users.role, 'company')));
+}
+
+/** 开通/调整装修队会员套餐。支付网关回调或老板线下确认后调用。 */
+export async function setCompanyMembership(id: number, patch: Partial<{
+  companyScale: string; membershipTier: string; membershipStatus: string; membershipExpiresAt: string;
+  monthlyLeadQuota: number; monthlyLeadsUsed: number; membershipPaidAmount: number; membershipStartedAt: string;
+}>) {
+  const db = await getDb();
+  await db.update(users).set(patch).where(and(eq(users.id, id), eq(users.role, 'company')));
+}
+
+/** 进入新的自然月时重置客户资源用量 */
+export async function ensureCurrentLeadPeriod(id: number) {
+  const db = await getDb();
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  if (!row) return null;
+  const currentMonth = now().slice(0, 7);
+  const periodMonth = (row.membershipStartedAt ?? '').slice(0, 7);
+  if (periodMonth !== currentMonth) {
+    await db.update(users).set({ monthlyLeadsUsed: 0, membershipStartedAt: now() }).where(eq(users.id, id));
+    return { ...row, monthlyLeadsUsed: 0, membershipStartedAt: now() };
+  }
+  return row;
+}
+
+/** 客户资源下发成功后累计本月用量 */
+export async function incrementMonthlyLeadUsage(id: number) {
+  const db = await getDb();
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  if (!row) return null;
+  await db.update(users).set({ monthlyLeadsUsed: Number(row.monthlyLeadsUsed ?? 0) + 1 }).where(eq(users.id, id));
+  return row;
+}
+
+export async function createMembershipPayment(p: {
+  companyId: number; companyName: string; tier: string; amountCny: number; paymentReference?: string;
+}) {
+  const db = await getDb();
+  const [row] = await db.insert(membershipPayments).values({ ...p, status: 'pending', createdAt: now() }).returning();
+  return row;
+}
+
+export async function listMembershipPayments(companyId?: number) {
+  const db = await getDb();
+  return companyId
+    ? db.select().from(membershipPayments).where(eq(membershipPayments.companyId, companyId)).orderBy(asc(membershipPayments.id))
+    : db.select().from(membershipPayments).orderBy(asc(membershipPayments.id));
+}
+
+export async function setMembershipPaymentStatus(id: number, status: 'paid' | 'rejected') {
+  const db = await getDb();
+  const [row] = await db.update(membershipPayments).set({ status, paidAt: status === 'paid' ? now() : null }).where(eq(membershipPayments.id, id)).returning();
+  return row ?? null;
+}
+
+/** 每月 1 日重置客户资源用量 */
+export async function resetMonthlyLeadUsage(id: number) {
+  const db = await getDb();
+  await db.update(users).set({ monthlyLeadsUsed: 0 }).where(and(eq(users.id, id), eq(users.role, 'company')));
 }
 
 /** 保存密码哈希（登录时把旧的明文密码升级为哈希） */
@@ -381,10 +519,40 @@ export async function updateOrder(id: number, patch: Partial<{ companyId: number
 }
 
 // ---- Bids ----
-export async function createBid(b: { orderId: number; companyId: number; companyName: string; amount: string; weeks: string; note?: string }) {
+export async function createBid(b: {
+  orderId: number; companyId: number; companyName: string; amount: string; weeks: string; note?: string;
+  estimatedCostCny?: number; profitCny?: number; platformCommissionCny?: number; netProfitCny?: number; commissionBasis?: string;
+  bidRiskLevel?: string; bidRiskScore?: number; bidRiskReason?: string;
+}) {
   const db = await getDb();
   const [row] = await db.insert(bids).values({ ...b, status: 'pending', createdAt: now() }).returning();
   return row;
+}
+
+export async function createCommissionSettlement(p: {
+  orderId: number; bidId: number; companyId: number; companyName: string;
+  revenueCny: number; estimatedCostCny: number; profitCny: number;
+  platformCommissionCny: number; contractorNetProfitCny: number; commissionBasis?: string;
+}) {
+  const db = await getDb();
+  const existing = await getCommissionSettlementByOrder(p.orderId);
+  if (existing) return existing;
+  const [row] = await db.insert(commissionSettlements).values({
+    ...p, commissionRatePct: 10, status: 'pending', createdAt: now(),
+  }).returning();
+  return row;
+}
+
+export async function getCommissionSettlementByOrder(orderId: number) {
+  const db = await getDb();
+  const [row] = await db.select().from(commissionSettlements).where(eq(commissionSettlements.orderId, orderId)).limit(1);
+  return row ?? null;
+}
+
+export async function setCommissionSettlementStatus(id: number, status: 'settled' | 'cancelled') {
+  const db = await getDb();
+  const [row] = await db.update(commissionSettlements).set({ status, settledAt: status === 'settled' ? now() : null }).where(eq(commissionSettlements.id, id)).returning();
+  return row ?? null;
 }
 
 export async function listBidsByOrder(orderId: number) {

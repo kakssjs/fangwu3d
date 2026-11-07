@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createUser, getUserByPhone } from '@i-renovation/shared';
 import { MIN_PASSWORD, checkBossLogin, hashPassword, setSessionCookie } from '@/lib/auth';
+import { getMembershipTier, recommendedTierForScale, type ContractorScale } from '@i-renovation/shared/membership';
 
 type RegisterBody = {
   role?: string;
@@ -14,6 +15,8 @@ type RegisterBody = {
   districts?: string[];
   serviceTypes?: string[];
   specialties?: string[];
+  companyScale?: string;
+  membershipTier?: string;
 };
 
 export async function POST(req: Request) {
@@ -64,6 +67,8 @@ export async function POST(req: Request) {
     const companyName = (body.companyName ?? '').trim();
     if (!companyName) return NextResponse.json({ error: '请填写公司名称' }, { status: 400 });
 
+    const companyScale = (body.companyScale ?? 'small') as ContractorScale;
+    const membershipTier = getMembershipTier(body.membershipTier ?? recommendedTierForScale(companyScale).id);
     const user = await createUser({
       role: 'company',
       name,
@@ -76,8 +81,22 @@ export async function POST(req: Request) {
       districts: body.districts,
       serviceTypes: body.serviceTypes,
       specialties: body.specialties,
+      companyScale,
+      membershipTier: membershipTier.id,
+      membershipStatus: 'pending_payment',
+      monthlyLeadQuota: membershipTier.monthlyLeadQuota,
     });
-    const res = NextResponse.json({ id: user.id, role: user.role });
+    const res = NextResponse.json({
+      id: user.id,
+      role: user.role,
+      membership: {
+        tier: membershipTier.id,
+        tierName: membershipTier.name,
+        firstYearFeeCny: membershipTier.firstYearFeeCny,
+        annualFeeCny: membershipTier.annualFeeCny,
+        status: 'pending_payment',
+      },
+    });
     setSessionCookie(res, user.id, 'company');
     return res;
   } catch {

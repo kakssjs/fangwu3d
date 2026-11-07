@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { analyzeRoomLayout, type ExpectedWalls, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
 import { buildSceneModel, type SceneModel } from '@i-renovation/shared/scene3d';
 import { describeMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
+import { getMembershipTier } from '@i-renovation/shared/membership';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
 import PascalBridge from '../../components/PascalBridge';
@@ -445,7 +446,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const savedSceneModel = byKind('scene_model') as SceneModel | undefined;
   const design = byKind('design') as { svg?: string; note?: string } | undefined;
   const quote = byKind('quote') as { items?: { item: string; qty: number; unit: string; price?: number; total: number }[]; total?: number; weeks?: number; schedule?: { phase: string; weeks: number }[] } | undefined;
-  const match = byKind('match') as { contractors?: { id?: number | string; bidId?: number; name: string; rating?: number; score?: number; reason: string; districts?: string[]; types?: string[]; verified?: boolean; amount?: string | number; weeks?: string | number }[]; note?: string; source?: string; bidCount?: number } | undefined;
+  const match = byKind('match') as { contractors?: { id?: number | string; bidId?: number; name: string; rating?: number; score?: number; reason: string; districts?: string[]; types?: string[]; verified?: boolean; amount?: string | number; weeks?: string | number; membershipTier?: string; customerResourceLevel?: string }[]; note?: string; source?: string; bidCount?: number } | undefined;
 
   const doneCount = STAGES.filter(s => done.has(s.key)).length;
   const progress = Math.round((doneCount / STAGES.length) * 100);
@@ -1068,6 +1069,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
                   <span className={`tag ${c.verified ? 'tag-green' : 'tag-cyan'}`}>{c.verified ? '✓ 资质已人工审核' : '◌ 资质待审核'}</span>
+                  <span className="tag tag-purple">{getMembershipTier(c.membershipTier).badge}</span>
                   {c.amount != null && c.weeks != null && <span className="tag tag-orange">投标 ¥{c.amount} · {c.weeks} 周</span>}
                   {c.types?.map(t => <span key={t} className="tag tag-purple">{t}</span>)}
                   {c.districts?.map(d => <span key={d} className="tag tag-cyan">📍{d}</span>)}
