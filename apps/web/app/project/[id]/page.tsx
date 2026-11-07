@@ -943,8 +943,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <div className="accent-bar" />
-              3D 空间建模（2D→3D 同源重建）
-              <small>{useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION'}</small>
+              3D 设计模型（户型 · 材质 · 家具）
+              <small>{activeSceneModel ? `SCENE MODEL → ${activeSceneModel.materialPreset.name} · GLB / BLENDER / PASCAL` : (useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION')}</small>
             </div>
             {customGeom && plan?.geometry && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -1304,3 +1304,4 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     </main>
   );
 }
+
