@@ -555,7 +555,8 @@ export function analyzeRoomLayout(plan: PlanGeometry, roomIndex: number): { text
     `Far wall: ${describe(f.far)}.`,
     `Left wall: ${describe(f.left)}.`,
     `Right wall: ${describe(f.right)}.`,
-    `Wall behind the camera: ${describe(f.near)}.`,
+    // 相机身后那面墙拍不到。把它的门窗写进提示词，图像模型会把它们画到画面里（实测，多出来的门正是这些）
+    `The wall behind the camera is not in the picture.`,
     `Do not add windows or doors that are not listed.`,
   ].join(' ');
   return { text, expected: { far: count(f.far), left: count(f.left), right: count(f.right) } };
