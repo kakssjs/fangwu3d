@@ -151,3 +151,53 @@ work normally now.
 Several test accounts and projects were created in the local database during testing
 (`UI Test Owner`, `Flow Owner`, `Flow Renovation Co`, and numbered test users). They are
 harmless but not part of the code.
+
+## 9. Email verification and email-code login (2026-11-07)
+
+Registration can require a verified email, and people can log in with a code sent to that email.
+Phone + password login still works. Payment is separate: a company still pays its membership fee
+first, and the membership becomes active only after the boss confirms the payment.
+
+**How it works** (`apps/web/lib/email.ts`, same design as the studio's email service):
+
+- `POST /api/auth/email/code` `{email, purpose: "register" | "login"}` sends a 6-digit code. It is valid
+  for 5 minutes, works once, and is cancelled after 5 wrong tries. Only a keyed hash of it is stored
+  (`email_codes`), keyed with the session secret.
+- Send limits are kept in the database (`email_quotas`) and spent *before* sending, so retries and
+  timeouts can't flood a mailbox: 1 per minute and 5 per day per address (registration and login share
+  them), 10 per hour per IP, 200 per day for the whole site.
+- For a login code, an address with no account gets the same answer as a real one, but no email is sent,
+  so nobody can find out who has registered.
+- `POST /api/auth/register`: when email is on, `email` and `emailCode` are required. The code is used
+  only after the phone checks pass, so a duplicate phone doesn't waste it. A verified email can belong
+  to only one account (case doesn't matter). The account stores `email_verified_at`.
+- `POST /api/auth/email/login` `{email, code}` signs in only accounts whose email was verified.
+- `GET /api/auth/email` returns `{enabled}` so the screens know whether to show the email fields.
+- Screens (`RegisterModal.tsx`): at sign-up, an email field with "获取验证码" and a code field; at login,
+  a choice between "手机号密码登录" and "邮箱验证码登录". The countdown is only a hint; the server decides.
+
+**Settings** (`apps/web/.env.local`; off unless `EMAIL_ENABLED=true`):
+
+```
+EMAIL_ENABLED=true
+SMTP_HOST=smtp.qq.com          # QQ Mail; 163: smtp.163.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=3168432265@qq.com
+SMTP_PASSWORD=<the mailbox's SMTP 授权码, not its login password>
+SMTP_FROM=3168432265@qq.com
+```
+
+For local tests, `EMAIL_DEV_OUTBOX=/path/file.jsonl` (ignored in production) writes the messages to that
+file instead of sending them.
+
+**Checked:** a 25-step test on a fresh database covered sending, limits, register with and without a
+code, one-time codes, duplicate emails in any case, company sign-up with its membership,
+email login, unknown addresses, 5 wrong tries, and phone login. The payment flow was also checked:
+a new company is pending and can't bid, the boss approves, the membership is active, and a second
+approval is refused. In the browser, email login worked through the real screen. On the live server, a real code was
+sent through QQ.
+
+**Fixed on the way:** the setup SQL added `membership_payments` columns before creating that table,
+so a brand-new database failed to start. The teammate had fixed the same thing directly on the
+server; their fixes there are now in git too (commit "Bring in the payment fixes made directly on the server").
