@@ -168,13 +168,17 @@ first, and the membership becomes active only after the boss confirms the paymen
   them), 10 per hour per IP, 200 per day for the whole site.
 - For a login code, an address with no account gets the same answer as a real one, but no email is sent,
   so nobody can find out who has registered.
-- `POST /api/auth/register`: when email is on, `email` and `emailCode` are required. The code is used
-  only after the phone checks pass, so a duplicate phone doesn't waste it. A verified email can belong
-  to only one account (case doesn't matter). The account stores `email_verified_at`.
+- `POST /api/auth/register` has **two separate ways**, chosen with `method`:
+  - `"phone"` (the default, so older clients keep working): phone + password, exactly as before. An
+    email typed in here is only a contact address; it is not verified and can't be used to log in.
+  - `"email"` (only when email is on): email + `emailCode`, with no phone or password. A verified email
+    can belong to only one account (case doesn't matter), and the account stores `email_verified_at`.
+  People log in the same way they registered.
 - `POST /api/auth/email/login` `{email, code}` signs in only accounts whose email was verified.
 - `GET /api/auth/email` returns `{enabled}` so the screens know whether to show the email fields.
-- Screens (`RegisterModal.tsx`): at sign-up, an email field with "获取验证码" and a code field; at login,
-  a choice between "手机号密码登录" and "邮箱验证码登录". The countdown is only a hint; the server decides.
+- Screens (`RegisterModal.tsx`): at sign-up, a choice between "手机号注册" (phone, optional contact email,
+  password) and "邮箱注册" (email with "获取验证码", and the code); at login, a choice between
+  "手机号密码登录" and "邮箱验证码登录". The countdown is only a hint; the server decides.
 
 **Settings** (`apps/web/.env.local`; off unless `EMAIL_ENABLED=true`):
 
@@ -201,3 +205,5 @@ sent through QQ.
 **Fixed on the way:** the setup SQL added `membership_payments` columns before creating that table,
 so a brand-new database failed to start. The teammate had fixed the same thing directly on the
 server; their fixes there are now in git too (commit "Bring in the payment fixes made directly on the server").
+
+**Phone or email (later the same day).** Registration first required phone, password *and* a verified email. You asked for the two to be separate, so each person now picks one way. Tested: 16 checks covering phone-only and email-only sign-up and login, company sign-up both ways with its membership, and the two ways staying separate. Also checked in the browser and on the live site.
