@@ -208,6 +208,12 @@ CREATE TABLE IF NOT EXISTS commission_settlements (
   platform_commission_cny integer NOT NULL, contractor_net_profit_cny integer NOT NULL,
   status text NOT NULL DEFAULT 'pending', created_at text NOT NULL, settled_at text
 );
+CREATE TABLE IF NOT EXISTS membership_payments (
+  id serial PRIMARY KEY, company_id integer NOT NULL, company_name text NOT NULL,
+  tier text NOT NULL, billing_cycle text NOT NULL DEFAULT 'annual', period_months integer DEFAULT 12,
+  amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
+  payment_reference text, created_at text NOT NULL, paid_at text
+);
 ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
 ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS estimated_cost_cny integer DEFAULT 0;
@@ -218,12 +224,6 @@ ALTER TABLE bids ADD COLUMN IF NOT EXISTS commission_basis text DEFAULT 'gross_r
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_level text DEFAULT 'unknown';
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_score integer DEFAULT 0;
 ALTER TABLE bids ADD COLUMN IF NOT EXISTS bid_risk_reason text;
-CREATE TABLE IF NOT EXISTS membership_payments (
-  id serial PRIMARY KEY, company_id integer NOT NULL, company_name text NOT NULL,
-  tier text NOT NULL, billing_cycle text NOT NULL DEFAULT 'annual', period_months integer DEFAULT 12,
-  amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
-  payment_reference text, created_at text NOT NULL, paid_at text
-);
 CREATE TABLE IF NOT EXISTS contracts (
   id serial PRIMARY KEY, order_id integer NOT NULL, content text NOT NULL,
   homeowner_signed integer NOT NULL DEFAULT 0, company_signed integer NOT NULL DEFAULT 0,
