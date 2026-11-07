@@ -6,6 +6,7 @@ import { pgTable, serial, text, integer, jsonb } from 'drizzle-orm/pg-core';
 import { eq, asc, and, inArray, isNotNull, lte } from 'drizzle-orm';
 import path from 'node:path';
 import fs from 'node:fs';
+import { getMembershipTier } from './membership';
 
 export const projects = pgTable('projects', {
   id: serial('id').primaryKey(),
@@ -246,14 +247,13 @@ CREATE TABLE IF NOT EXISTS membership_payments (
   amount_cny integer NOT NULL, status text NOT NULL DEFAULT 'pending',
   payment_reference text, created_at text NOT NULL, paid_at text
 );
--- 旧库补列：必须在建表之后（放在前面时，全新数据库在这里报错，后面的表都建不出来）
-ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
-ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;
 CREATE TABLE IF NOT EXISTS contracts (
   id serial PRIMARY KEY, order_id integer NOT NULL, content text NOT NULL,
   homeowner_signed integer NOT NULL DEFAULT 0, company_signed integer NOT NULL DEFAULT 0,
   created_at text NOT NULL, signed_at text
-);`;
+);
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'annual';
+ALTER TABLE membership_payments ADD COLUMN IF NOT EXISTS period_months integer DEFAULT 12;`;
 
 const globalForDb = globalThis as unknown as { __dbPromise?: Promise<ReturnType<typeof drizzle>> };
 
@@ -549,8 +549,28 @@ export async function listMembershipPayments(companyId?: number) {
 
 export async function setMembershipPaymentStatus(id: number, status: 'paid' | 'rejected') {
   const db = await getDb();
-  const [row] = await db.update(membershipPayments).set({ status, paidAt: status === 'paid' ? now() : null }).where(eq(membershipPayments.id, id)).returning();
-  return row ?? null;
+  return db.transaction(async tx => {
+    const [row] = await tx.update(membershipPayments).set({ status, paidAt: status === 'paid' ? now() : null })
+      .where(and(eq(membershipPayments.id, id), eq(membershipPayments.status, 'pending'))).returning();
+    if (!row) return null;
+    if (status === 'paid') {
+      const [company] = await tx.select().from(users).where(and(eq(users.id, row.companyId), eq(users.role, 'company')));
+      if (!company) throw new Error('Company not found');
+      const tier = getMembershipTier(row.tier);
+      const expires = new Date(Math.max(Date.now(), Date.parse(company.membershipExpiresAt ?? '') || 0));
+      const day = expires.getUTCDate();
+      expires.setUTCDate(1);
+      expires.setUTCMonth(expires.getUTCMonth() + Number(row.periodMonths ?? 12));
+      const lastDay = new Date(Date.UTC(expires.getUTCFullYear(), expires.getUTCMonth() + 1, 0)).getUTCDate();
+      expires.setUTCDate(Math.min(day, lastDay));
+      await tx.update(users).set({ membershipTier: tier.id, membershipStatus: 'active',
+        membershipExpiresAt: expires.toISOString(), monthlyLeadQuota: tier.monthlyLeadQuota,
+        membershipPaidAmount: Number(company.membershipPaidAmount ?? 0) + row.amountCny,
+        membershipStartedAt: company.membershipStartedAt || now(),
+      }).where(eq(users.id, row.companyId));
+    }
+    return row;
+  });
 }
 
 /** 每月 1 日重置客户资源用量 */

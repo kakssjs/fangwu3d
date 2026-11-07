@@ -104,13 +104,16 @@ export default function BossConsole() {
   async function confirmMembership(paymentId: number, action: 'approve' | 'reject') {
     setMembershipBusy(paymentId);
     try {
-      await fetch('/api/company/membership/confirm', {
+      const confirmation = await fetch('/api/company/membership/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentId, action }),
       });
+      if (!confirmation.ok) throw new Error((await confirmation.json()).error || '确认失败');
       const res = await fetch('/api/boss');
       if (res.ok) setData(await res.json());
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '确认失败');
     } finally {
       setMembershipBusy(null);
     }

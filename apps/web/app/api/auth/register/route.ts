@@ -26,6 +26,10 @@ type RegisterBody = {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as RegisterBody;
+    if (body.role === 'company' && (
+      (body.membershipTier !== undefined && !['basic', 'professional', 'elite'].includes(body.membershipTier)) ||
+      (body.billingCycle !== undefined && !['monthly', 'quarterly', 'annual'].includes(body.billingCycle))
+    )) return NextResponse.json({ error: '套餐或付款周期无效' }, { status: 400 });
     const role = body.role;
 
     if (role !== 'homeowner' && role !== 'company') {

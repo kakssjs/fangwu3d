@@ -44,6 +44,8 @@ type Bid = {
 type MyBid = Bid & { projectName: string; estimatedCostCny?: number; profitCny?: number; platformCommissionCny?: number; netProfitCny?: number };
 
 type MembershipProfile = {
+  membershipStartedAt?: string;
+  membershipPaidAmount?: number;
   companyScale?: string;
   membershipTier?: string;
   membershipStatus?: string;
@@ -200,14 +202,20 @@ export default function ContractorPortal() {
 
   async function applyMembership(tierId: MembershipTierId) {
     if (membershipBusy) return;
+    const paymentReference = window.prompt('请先向平台核实线下收款方式。已付款可填写转账流水号；未付款可留空申请，核实收款后才会开通。');
+    if (paymentReference === null) return;
     setMembershipBusy(true);
     try {
       const res = await fetch('/api/company/membership/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tierId, companyScale: membership?.companyScale ?? 'small', billingCycle }),
+        body: JSON.stringify({ tierId, companyScale: membership?.companyScale ?? 'small', billingCycle, paymentReference }),
       });
-      if (res.ok) setMembership(prev => ({ ...(prev ?? {}), membershipTier: tierId, membershipStatus: 'pending_payment', monthlyLeadQuota: getMembershipTier(tierId).monthlyLeadQuota, monthlyLeadsUsed: 0 }));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '会员申请失败');
+      window.alert(`申请已提交：单号 ${data.payment.id}，应付 ¥${data.amountCny}。请联系平台核实收款方式，老板确认收款后生效。现有会员权益继续有效。`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '会员申请失败');
     } finally {
       setMembershipBusy(false);
     }
@@ -509,6 +517,14 @@ export default function ContractorPortal() {
                     <div className="panel-title" style={{ color: '#fffdf8' }}>
                       <div className="accent-bar" />
                       会员与客户资源
+                      <button className="btn" onClick={async () => {
+                        try {
+                          const res = await fetch('/api/company/membership/apply');
+                          if (!res.ok) throw new Error('读取付款记录失败');
+                          const rows = await res.json() as Array<{ id: number; amountCny: number; status: string }>;
+                          window.alert(rows.map(p => `单号 ${p.id} · ¥${p.amountCny} · ${{ pending: '待核实收款', paid: '已收款开通', rejected: '已驳回' }[p.status] ?? p.status}`).join('\n') || '暂无记录');
+                        } catch { window.alert('读取付款记录失败，请稍后重试'); }
+                      }}>付款记录</button>
                       <small>{getMembershipTier(membership?.membershipTier).name} · {membership?.membershipStatus === 'active' ? '已开通' : '待支付'}</small>
                     </div>
                     <p style={{ color: 'rgba(255,255,255,.76)', lineHeight: 1.8, margin: 0 }}>
@@ -531,16 +547,16 @@ export default function ContractorPortal() {
                         <div className="role-feature-card" key={tier.id} style={active ? { borderColor: 'var(--accent)', boxShadow: '0 16px 42px rgba(38,82,65,.12)' } : undefined}>
                           <b>{tier.badge}</b>
                           <h3>{tier.name}</h3>
-                          <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>首年 ¥{membershipFeeFor(tier.id, true, billingCycle).toLocaleString()} / {billingCycle === 'monthly' ? '月' : billingCycle === 'quarterly' ? '季' : '年'}</p>
+                          <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>¥{membershipFeeFor(tier.id, !membership?.membershipStartedAt && !Number(membership?.membershipPaidAmount ?? 0), billingCycle).toLocaleString()} / {billingCycle === 'monthly' ? '月' : billingCycle === 'quarterly' ? '季' : '年'}</p>
                           <p style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 8 }}>首年按年 ¥{tier.firstYearFeeCny.toLocaleString()} · 续费 ¥{tier.annualFeeCny.toLocaleString()} / 年</p>
                           <p>{tier.benefits.slice(0, 3).join(' · ')}</p>
                           <button
                             className={active ? 'btn btn-ghost' : 'btn btn-primary'}
-                            disabled={membershipBusy || active}
+                            disabled={membershipBusy}
                             onClick={() => void applyMembership(tier.id)}
                             style={{ marginTop: 12 }}
                           >
-                            {active ? '当前套餐' : membership?.membershipStatus === 'pending_payment' ? '切换套餐 / 继续开通' : '申请开通'}
+                            {active && membership?.membershipStatus === 'active' ? '申请续费' : '申请开通'}
                           </button>
                         </div>
                       );
