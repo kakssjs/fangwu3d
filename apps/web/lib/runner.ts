@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   claimNextTask, createTask, finishTask, failTask, escalateTask, waitingTask, upsertResult, getProject, getResult, listTasks,
   calcQuote, generatePlanGeometry, planFromRects, planToSvg, listCompanies, getOrderByProject, listBidsByOrder, CORE_CHAIN, EXCEPTION_RULES,
-  classifyException, exceptionInfo,
+  classifyException, exceptionInfo, buildSceneModel, validateSceneModel, describeMaterialPreset,
   type PlanRoom, type PlanGeometry, type QuoteItem,
 } from '@i-renovation/shared';
 import { callMimo } from './mimo';
@@ -165,6 +165,8 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
           warnings: geometry.warnings,
         };
         await upsertResult(task.projectId, 'plan', content);
+        const sceneModel = buildSceneModel(geometry, plan, project.style, { source: 'floor_plan' });
+        await upsertResult(task.projectId, 'scene_model', sceneModel);
         return { content, tokens: 0 };
       }
       // ② 上传户型图 → MiMo 识别（无工作台房间时）
@@ -199,6 +201,8 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
         warnings: geometry.warnings,
       };
       await upsertResult(task.projectId, 'plan', content);
+      const sceneModel = buildSceneModel(geometry, plan, project.style, { source: valid ? 'floor_plan' : 'agent_fallback' });
+      await upsertResult(task.projectId, 'scene_model', sceneModel);
       return lowConfidence
         ? { content, tokens: 0, exception: 'low_confidence_floorplan', note: `识别结果：${valid ? `面积偏差 ${Math.round(Math.abs(sumArea - declaredArea) / declaredArea * 100)}%` : '房间数据不完整'}；已降级出图，等待用户补充` }
         : { content, tokens: 0 };
@@ -209,8 +213,16 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
       const rooms = planContent?.rooms ?? heuristicPlan(project.area ?? undefined);
       const geometry = planContent?.geometry ?? generatePlanGeometry(rooms, { totalArea: Number(project.area) || undefined });
       const svg = planToSvg(geometry, project.style, project.name);
-      const content = { svg, rooms, geometry, style: project.style, needs: project.needs, note: 'AI 生成二维布局方案（施工参考）· 2D 与 3D 同源重建' };
+      const sceneModel = buildSceneModel(geometry, rooms, project.style, {
+        source: planContent?.geometry ? 'floor_plan' : 'agent_fallback',
+      });
+      const content = {
+        svg, rooms, geometry, style: project.style, needs: project.needs,
+        sceneModelId: sceneModel.schema, materialPresetId: sceneModel.materialPresetId,
+        note: 'AI 生成二维布局方案（施工参考）· 2D、3D、材质与导出共用同一套场景模型',
+      };
       await upsertResult(task.projectId, 'design', content);
+      await upsertResult(task.projectId, 'scene_model', sceneModel);
 
       // Agnes 生成各房间装饰效果图：房间有几个生成几个（用户识别/手绘房间优先，Agent 房间兜底），3 张并发
       const decorations: { room: string; prompt: string; url?: string; b64?: string }[] = new Array(rooms.length);
@@ -220,7 +232,8 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
         while (nextIdx < rooms.length) {
           const i = nextIdx++;
           const room = rooms[i];
-          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${project.style} style, warm lighting, realistic, high quality, architectural visualization`;
+          const materialPrompt = describeMaterialPreset(sceneModel.materialPreset);
+          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization. ${materialPrompt}`;
           try {
             const img = await generateImage({ prompt, size: '1K', ratio: '16:9' });
             decorations[i] = { room: room.name, prompt, url: img.url, b64: img.b64_json };
@@ -281,6 +294,8 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
       const planContent = planRow?.content as { rooms?: PlanRoom[]; geometry?: PlanGeometry; warnings?: string[] } | undefined;
       const quote = quoteRow?.content as { items?: QuoteItem[]; total?: number } | undefined;
       const decor = decorRow?.content as { images?: { url?: string; b64?: string }[] } | undefined;
+      const sceneRow = await getResult(task.projectId, 'scene_model');
+      const sceneModel = sceneRow?.content as Parameters<typeof validateSceneModel>[0] | undefined;
 
       interface Check { check: string; ok: boolean; rule?: string; level: 'critical' | 'warn'; detail: string }
       const checks: Check[] = [];
@@ -302,7 +317,11 @@ async function runAgent(task: { id: number; projectId: number; toAgent: string; 
       const drift = quoteTotal > 0 ? Math.abs(baseline.total - quoteTotal) / quoteTotal : 1;
       checks.push({ check: '报价与基准偏离 ≤ 30%', ok: drift <= 0.3, rule: 'quote_mismatch', level: 'critical', detail: `偏离 ${(drift * 100).toFixed(1)}%（基准 ¥${baseline.total}）` });
 
-      // 3. 图片完整性（缺失 → render_failed 降级，不阻塞）
+      // 3. 3D 场景模型完整性（几何、材质库、房间家具标签）
+      const sceneCheck = sceneModel ? validateSceneModel(sceneModel) : { ok: false, errors: ['缺少 scene_model'] };
+      checks.push({ check: '3D 场景模型完整性', ok: sceneCheck.ok, rule: 'render_failed', level: 'warn', detail: sceneCheck.ok ? '几何、材质库和房间模型均可用' : sceneCheck.errors.join('；') });
+
+      // 4. 图片完整性（缺失 → render_failed 降级，不阻塞）
       const imgs = decor?.images ?? [];
       const okImgs = imgs.filter(i => i && (i.url || i.b64)).length;
       const imgOk = imgs.length === 0 || okImgs / imgs.length >= 0.5;

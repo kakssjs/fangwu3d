@@ -2,6 +2,8 @@
 import { useEffect, useState, use, Suspense, lazy, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { analyzeRoomLayout, type ExpectedWalls, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
+import { buildSceneModel, type SceneModel } from '@i-renovation/shared/scene3d';
+import { describeMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
 import { agentOf } from '@/lib/agents';
@@ -259,7 +261,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         while (next < target.length) {
           const i = next++;
           const room = target[i];
-          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization${room.layout ? '. ' + room.layout : ''}`;
+          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization${room.layout ? '. ' + room.layout : ''}${materialPrompt ? '. ' + materialPrompt : ''}`;
           // 同一房间重新生成时，旧图进入历史；生成失败则保留旧图
           const prev = decorations[i]?.room === room.name ? decorations[i] : undefined;
           try {
@@ -352,6 +354,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           room: roomName,
           layout: currentImg?.layout,
           expected: currentImg?.expected,
+          materialPrompt,
         }),
       });
       const json = await res.json();
@@ -438,6 +441,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const byKind = (k: string) => data.results.find(r => r.kind === k)?.content as Record<string, unknown> | undefined;
 
   const plan = byKind('plan') as { rooms?: PlanRoom[]; geometry?: PlanGeometry; note?: string; warnings?: string[] } | undefined;
+  const savedSceneModel = byKind('scene_model') as SceneModel | undefined;
   const design = byKind('design') as { svg?: string; note?: string } | undefined;
   const quote = byKind('quote') as { items?: { item: string; qty: number; unit: string; price?: number; total: number }[]; total?: number; weeks?: number; schedule?: { phase: string; weeks: number }[] } | undefined;
   const match = byKind('match') as { contractors?: { id?: number | string; bidId?: number; name: string; rating?: number; score?: number; reason: string; districts?: string[]; types?: string[]; verified?: boolean; amount?: string | number; weeks?: string | number }[]; note?: string; source?: string; bidCount?: number } | undefined;
@@ -445,6 +449,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const doneCount = STAGES.filter(s => done.has(s.key)).length;
   const progress = Math.round((doneCount / STAGES.length) * 100);
   const totalArea = plan?.rooms?.reduce((s, r) => s + r.area, 0) ?? 0;
+  const activeSceneModel: SceneModel | undefined = customGeom
+    ? buildSceneModel(customGeom, customGeom.rooms, data.project.style, { source: 'floor_plan' })
+    : savedSceneModel;
+  const materialPrompt = activeSceneModel ? describeMaterialPreset(activeSceneModel.materialPreset) : '';
 
   // 异常横幅（EXCEPTION_RULES）：等待用户补充 / 升级老板裁决 / 降级交付
   const waitingTasks = data.tasks.filter(t => t.status === 'waiting_user');
@@ -693,8 +701,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           totalArea={Number(data.project.area) || undefined}
           initial={fpData}
           onApply={(g) => {
+            if (!g) return;
             setCustomGeom(g);
             setFpSource('user');
+            const localScene = buildSceneModel(g, g.rooms, data.project.style, { source: 'floor_plan' });
+            void fetch(`/api/projects/${id}/results`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ kind: 'scene_model', upsert: true, content: localScene }),
+            });
           }}
           onRooms={handleRooms}
           onStdImage={handleStd}
@@ -940,7 +955,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               </div>
             )}
             <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>Loading 3D...</div>}>
-              <Scene3D geometry={effGeom} rooms={effRooms} />
+              <Scene3D geometry={effGeom} rooms={effRooms} presetId={activeSceneModel?.materialPresetId as MaterialPresetId | undefined} />
             </Suspense>
             {effWarnings.length > 0 && (
               <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>

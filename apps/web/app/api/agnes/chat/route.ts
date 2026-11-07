@@ -8,10 +8,10 @@ import { generateChecked, parseExpected } from '@/lib/render-check';
 export async function POST(req: NextRequest) {
   try {
     const s = await requireSession(req, ['homeowner', 'boss']); if (s instanceof NextResponse) return s;
-    const { message, imageUrl, style, room, layout, expected } = await req.json();
+    const { message, imageUrl, style, room, layout, expected, materialPrompt } = await req.json();
     if (!message) return NextResponse.json({ error: 'message required' }, { status: 400 });
 
-    const prompt = `Interior decoration design photo of ${room ?? 'a room'}, ${style ?? 'modern'} style. ${message}.${typeof layout === 'string' && layout ? ' ' + layout : ''} Realistic, high quality, warm lighting, architectural visualization.`;
+    const prompt = `Interior decoration design photo of ${room ?? 'a room'}, ${style ?? 'modern'} style. ${message}.${typeof layout === 'string' && layout ? ' ' + layout : ''}${typeof materialPrompt === 'string' && materialPrompt ? ' ' + materialPrompt : ''} Realistic, high quality, warm lighting, architectural visualization.`;
 
     const opts: Parameters<typeof generateChecked>[0] = {
       prompt,

@@ -19,6 +19,14 @@
     "./price": {
       "types": "./src/price.ts",
       "default": "./src/price.ts"
+    },
+    "./materials": {
+      "types": "./src/materials.ts",
+      "default": "./src/materials.ts"
+    },
+    "./scene3d": {
+      "types": "./src/scene3d.ts",
+      "default": "./src/scene3d.ts"
     }
   }
 }
