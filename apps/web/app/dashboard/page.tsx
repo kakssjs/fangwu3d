@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import NewProjectForm from '../components/NewProjectForm';
+import { INTERIOR_IMAGES, projectImage } from '@/lib/visuals';
 
 const DESIGN_FLOW = [
   { step: '01', label: '空间规划', note: '梳理户型、动线与生活需求' },
@@ -12,12 +13,7 @@ const DESIGN_FLOW = [
   { step: '05', label: '交付审核', note: '复核布局、报价和设计完整性' },
 ];
 
-const HOME_IMAGES = [
-  'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1800&q=88',
-  'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=86',
-  'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1200&q=86',
-  'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=1200&q=86',
-];
+const HOME_IMAGES = [INTERIOR_IMAGES.living, INTERIOR_IMAGES.livingWarm, INTERIOR_IMAGES.kitchen, INTERIOR_IMAGES.bedroom];
 
 type User = { id: number; role: string; name: string; companyName?: string };
 type ProjectCard = { id: number; name: string; style: string; stage: number };
@@ -101,6 +97,24 @@ export default function HomeownerDashboard() {
         </div>
       </section>
 
+      <section className="editorial-gallery">
+        <div className="editorial-shot" style={{ backgroundImage: `url("${INTERIOR_IMAGES.living}")` }}>
+          <div className="editorial-caption"><b>自然光与安静秩序</b><span>Living / 01</span></div>
+        </div>
+        <div className="editorial-shot" style={{ backgroundImage: `url("${INTERIOR_IMAGES.kitchen}")` }}>
+          <div className="editorial-caption"><b>日常动线</b><span>Kitchen / 02</span></div>
+        </div>
+        <div className="editorial-shot" style={{ backgroundImage: `url("${INTERIOR_IMAGES.bedroom}")` }}>
+          <div className="editorial-caption"><b>舒适留白</b><span>Bedroom / 03</span></div>
+        </div>
+        <div className="editorial-shot" style={{ backgroundImage: `url("${INTERIOR_IMAGES.detail}")` }}>
+          <div className="editorial-caption"><b>材质细节</b><span>Detail / 04</span></div>
+        </div>
+        <div className="editorial-shot" style={{ backgroundImage: `url("${INTERIOR_IMAGES.dining}")` }}>
+          <div className="editorial-caption"><b>家庭交流</b><span>Dining / 05</span></div>
+        </div>
+      </section>
+
       <section className="role-stat-grid">
         <div className="role-stat-card"><strong>{projects.length}</strong><span>我的装修项目<br />户型、设计、报价与施工进度</span></div>
         <div className="role-stat-card"><strong>3D</strong><span>沉浸式空间预览<br />家具、材质、漫游与 Blender 导出</span></div>
@@ -135,7 +149,7 @@ export default function HomeownerDashboard() {
           <div className="grid-3">
             {projects.map((p, index) => (
               <div key={p.id} style={{ position: 'relative' }}>
-                <a href={'/project/' + p.id} className="role-project-card" style={{ display: 'block', backgroundImage: `url("${HOME_IMAGES[(index % 3) + 1]}")` }}>
+                <a href={'/project/' + p.id} className="role-project-card" style={{ display: 'block', backgroundImage: `url("${projectImage(index + 1)}")` }}>
                   <div className="role-project-content">
                     <h3>{p.name}</h3>
                     <p>{p.style} · {p.stage >= 3 ? '施工匹配中' : '方案设计中'}</p>
@@ -149,7 +163,7 @@ export default function HomeownerDashboard() {
                     <button className="btn btn-ghost" onClick={() => setDelId(null)} style={{ fontSize: 11, padding: '4px 10px' }}>取消</button>
                   </div>
                 ) : (
-                  <button className="btn btn-ghost" onClick={() => setDelId(p.id)} style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, padding: '4px 10px', color: '#fffdf8', background: 'rgba(18,31,25,.38)', borderColor: 'rgba(255,255,255,.22)' }}>
+                  <button className="btn btn-ghost" onClick={() => setDelId(p.id)} style={{ position: 'absolute', top: 12, right: 12, fontSize: 11, padding: '4px 10px', color: '#fffdf8', background: 'rgba(27,36,42,.38)', borderColor: 'rgba(255,255,255,.22)' }}>
                     删除
                   </button>
                 )}

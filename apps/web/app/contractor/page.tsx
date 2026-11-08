@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CONTRACTOR_MEMBERSHIP_TIERS, getMembershipTier, membershipFeeFor, type MembershipBillingCycle, type MembershipTierId } from "@i-renovation/shared/membership";
 import { calculateContractorCommission, commissionLabel, type CommissionQuote } from "@i-renovation/shared/commission";
 import { explainFairBidding } from "@i-renovation/shared/fair-bidding";
+import { projectImage } from "@/lib/visuals";
 
 type PortalUser = {
   id: number;
@@ -437,23 +438,35 @@ export default function ContractorPortal() {
         </div>
       ) : (
         <>
-          <section className="role-stat-grid">
-            <div className="role-stat-card">
-              <strong>{openOrders.length}</strong>
-              <span>开放项目<br />可浏览需求并提交报价</span>
-            </div>
-            <div className="role-stat-card">
-              <strong>{myBids.length}</strong>
-              <span>我的竞价<br />查看报价、工期与审核状态</span>
-            </div>
-            <div className="role-stat-card">
-              <strong>{myOrders.length}</strong>
-              <span>合作订单<br />确认合作、合同与施工交付</span>
+          <section className="contract-overview">
+            <div className="brief-eyebrow">OVERVIEW · 经营概览</div>
+            <div className="overview-meta">
+              <div className="brief-item">
+                <span>开放项目</span>
+                <strong>{openOrders.length}</strong>
+                <em>可浏览需求并提交报价</em>
+              </div>
+              <div className="brief-item">
+                <span>我的竞价</span>
+                <strong>{myBids.length}</strong>
+                <em>报价、工期与审核状态</em>
+              </div>
+              <div className="brief-item">
+                <span>合作订单</span>
+                <strong>{myOrders.length}</strong>
+                <em>确认合作、合同与施工交付</em>
+              </div>
+              <div className="brief-item">
+                <span>会员状态</span>
+                <strong>{getMembershipTier(membership?.membershipTier).name}</strong>
+                <em>{membership?.membershipStatus === 'active' ? '已开通 · 客户资源已解锁' : '待支付 · 开通后可参与竞价'}</em>
+              </div>
             </div>
           </section>
 
-          <div className="notice notice-ok" style={{ marginBottom: 14 }}>
-            <strong>密封竞价规则：</strong>{explainFairBidding().join('；')}
+          <div className="rule-note">
+            <div className="rule-note-label">FAIR BIDDING · 密封竞价规则</div>
+            <p>{explainFairBidding().join('；')}</p>
           </div>
 
           <div className="role-tabs">
@@ -474,22 +487,18 @@ export default function ContractorPortal() {
             ))}
           </div>
 
-          <div className="role-feature-grid">
-            <div className="role-feature-card">
-              <b>01</b>
-              <h3>清晰报价</h3>
-              <p>根据项目面积、风格、预算和工期要求，提交更有竞争力的施工方案。</p>
-            </div>
-            <div className="role-feature-card">
-              <b>02</b>
-              <h3>项目交付</h3>
-              <p>统一管理匹配、双方确认、合同签署与订单状态，减少沟通遗漏。</p>
-            </div>
-            <div className="role-feature-card">
-              <b>03</b>
-              <h3>资质与口碑</h3>
-              <p>资质由平台人工审核，匹配结果结合真实投标和公司服务能力。</p>
-            </div>
+          <div className="collab-strip">
+            {[
+              { n: '01', t: '清晰报价', d: '根据项目面积、风格、预算和工期要求，提交更有竞争力的施工方案。' },
+              { n: '02', t: '项目交付', d: '统一管理匹配、双方确认、合同签署与订单状态，减少沟通遗漏。' },
+              { n: '03', t: '资质与口碑', d: '资质由平台人工审核，匹配结果结合真实投标和公司服务能力。' },
+            ].map(x => (
+              <div key={x.n} className="collab-item">
+                <b>{x.n}</b>
+                <h4>{x.t}</h4>
+                <p>{x.d}</p>
+              </div>
+            ))}
           </div>
 
           {error && (
@@ -505,7 +514,7 @@ export default function ContractorPortal() {
             <>
               {tab === "membership" && (
                 <div>
-                  <div className="panel" style={{ marginBottom: 16, background: 'linear-gradient(135deg, rgba(35,58,50,.96), rgba(88,111,98,.88))', color: '#fffdf8', border: '0' }}>
+                  <div className="panel" style={{ marginBottom: 16, background: 'linear-gradient(135deg, rgba(43,67,82,.96), rgba(92,112,124,.88))', color: '#fffdf8', border: '0' }}>
                     <div className="panel-title" style={{ color: '#fffdf8' }}>
                       <div className="accent-bar" />
                       会员与客户资源
@@ -528,7 +537,7 @@ export default function ContractorPortal() {
                     {CONTRACTOR_MEMBERSHIP_TIERS.map((tier) => {
                       const active = membership?.membershipTier === tier.id;
                       return (
-                        <div className="role-feature-card" key={tier.id} style={active ? { borderColor: 'var(--accent)', boxShadow: '0 16px 42px rgba(38,82,65,.12)' } : undefined}>
+                        <div className="role-feature-card" key={tier.id} style={active ? { borderColor: 'var(--accent)', boxShadow: '0 16px 42px rgba(43,67,82,.12)' } : undefined}>
                           <b>{tier.badge}</b>
                           <h3>{tier.name}</h3>
                           <p style={{ color: 'var(--accent)', fontSize: 18, fontFamily: 'var(--font-serif)', marginBottom: 4 }}>首年 ¥{membershipFeeFor(tier.id, true, billingCycle).toLocaleString()} / {billingCycle === 'monthly' ? '月' : billingCycle === 'quarterly' ? '季' : '年'}</p>
@@ -561,12 +570,22 @@ export default function ContractorPortal() {
                       <p>暂无开放项目可竞价</p>
                     </div>
                   ) : (
-                    openOrders.map((o) => (
+                    openOrders.map((o, index) => (
                       <div
                         key={o.id}
                         className="panel"
-                        style={{ marginBottom: 12 }}
+                        style={{ marginBottom: 12, overflow: 'hidden' }}
                       >
+                        <div
+                          style={{
+                            height: 128,
+                            margin: '-20px -22px 18px',
+                            background: `url("${projectImage(index)}") center/cover`,
+                            position: 'relative',
+                          }}
+                        >
+                          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, rgba(27,36,42,.46), transparent 62%)' }} />
+                        </div>
                         <div className="panel-title">
                           <div className="accent-bar" />
                           {projLabel(o.projectId)}
@@ -680,6 +699,11 @@ export default function ContractorPortal() {
                             <th>项目</th>
                             <th>报价</th>
                             <th>工期</th>
+                            <th>预计成本</th>
+                            <th>毛利</th>
+                            <th>平台服务费</th>
+                            <th>净利润</th>
+                            <th>报价风险</th>
                             <th>状态</th>
                             <th>提交时间</th>
                           </tr>
