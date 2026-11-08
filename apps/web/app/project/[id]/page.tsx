@@ -2,8 +2,12 @@
 import { useEffect, useState, use, Suspense, lazy, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { analyzeRoomLayout, type ExpectedWalls, type PlanGeometry, type PlanRoom } from '@i-renovation/shared/plan';
+import { buildSceneModel, type SceneModel } from '@i-renovation/shared/scene3d';
+import { describeMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
+import { getMembershipTier } from '@i-renovation/shared/membership';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
 import AgentAvatar from '../../components/AgentAvatar';
+import PascalBridge from '../../components/PascalBridge';
 import { agentOf } from '@/lib/agents';
 
 const Scene3D = lazy(() => import('../../components/Scene3D'));
@@ -153,6 +157,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const { id } = use(params);
   const router = useRouter();
   const [data, setData] = useState<ProjectData | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [order, setOrder] = useState<OrderData | null>(null);
   const [bids, setBids] = useState<BidData[]>([]);
   const [contract, setContract] = useState<ContractData | null>(null);
@@ -182,10 +187,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [delBusy, setDelBusy] = useState(false);
 
   useEffect(() => {
-    const load = () => fetch('/api/projects/' + id).then(r => r.json()).then(setData).catch(() => {});
-    load();
-    const t = setInterval(load, 2000);
-    return () => clearInterval(t);
+    let cancelled = false;
+    setData(null); setLoadError(''); setDecorations([]); setFpData(null); setCustomGeom(null); setOrder(null); setContract(null); setDecision(null);
+    const load = async () => {
+      try {
+        const response = await fetch('/api/projects/' + id);
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `读取项目失败（${response.status}）`);
+        if (!cancelled) { setData(body); setLoadError(''); }
+      } catch (error) {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : '读取项目失败');
+      }
+    };
+    void load();
+    const t = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 2000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [id]);
 
   useEffect(() => {
@@ -259,7 +275,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         while (next < target.length) {
           const i = next++;
           const room = target[i];
-          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization${room.layout ? '. ' + room.layout : ''}`;
+          const prompt = `Interior decoration design photo of a ${room.name}, ${room.area} square meters, ${data!.project.style} style, fully furnished and decorated, warm lighting, realistic, high quality, architectural visualization${room.layout ? '. ' + room.layout : ''}${materialPrompt ? '. ' + materialPrompt : ''}`;
           // 同一房间重新生成时，旧图进入历史；生成失败则保留旧图
           const prev = decorations[i]?.room === room.name ? decorations[i] : undefined;
           try {
@@ -283,7 +299,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       setDecorations(imgs);
       if (imgs.length > 0) setSelectedIdx(0);
       await persistDecorations(imgs);
-    } finally {
+    } catch (error) { window.alert(error instanceof Error ? error.message : '效果图保存失败'); } finally {
       setGenRoomsBusy(false);
       setGenRoomsProgress('');
     }
@@ -297,7 +313,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       const base = quote?.total ?? 0;
       const finalTotal = Math.round(base * (1 + adjustPct / 100));
       const confirmedAt = new Date().toISOString();
-      await fetch(`/api/projects/${id}/results`, {
+      const saved = await fetch(`/api/projects/${id}/results`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -305,23 +321,25 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           content: { finalTotal, adjustPct, confirmedAt, note: '业主最终确认（人工动作）· 确认后自动发布' },
         }),
       });
+      if (!saved.ok) throw new Error('确认结果保存失败，请重试');
       if (!order) {
         const res = await fetch('/api/orders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: Number(id), homeownerId: readUser().id }),
         });
-        if (res.ok) setOrder((await res.json()) as OrderData);
+        if (!res.ok) throw new Error((await res.json()).error || '发布失败');
+        setOrder((await res.json()) as OrderData);
       }
       setDecision({ finalTotal, adjustPct, confirmedAt });
-    } finally {
+    } catch (error) { window.alert(error instanceof Error ? error.message : '保存或发布失败'); } finally {
       setConfirmBusy(false);
     }
   }
 
   // 保存各房间装饰图（含历史版本），覆盖式，刷新后不丢
-  function persistDecorations(imgs: DecorationImage[]) {
-    return fetch(`/api/projects/${id}/results`, {
+  async function persistDecorations(imgs: DecorationImage[]) {
+    const saved = await fetch(`/api/projects/${id}/results`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -330,6 +348,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         content: { images: imgs, style: data?.project.style, note: `根据房型图生成的各房间渲染图（${imgs.length} 间，AI 生成）` },
       }),
     });
+    if (!saved.ok) throw new Error('效果图保存失败，请重试');
   }
 
   // Chat: modify decoration image
@@ -352,16 +371,17 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           room: roomName,
           layout: currentImg?.layout,
           expected: currentImg?.expected,
+          materialPrompt,
         }),
       });
       const json = await res.json();
       if (json.url || json.b64_json) {
         const newImg = withHistory({ room: roomName, prompt: msg, layout: currentImg?.layout, expected: currentImg?.expected, estimated: currentImg?.estimated, check: json.check, url: json.url, b64: json.b64_json }, currentImg);
         const nextImgs = decorations.map((d, i) => i === selectedIdx ? newImg : d);
+        await persistDecorations(nextImgs);
         setDecorations(nextImgs);
         setChatMessages(prev => [...prev, { role: 'assistant', content: `已根据"${msg}"重新生成 ${roomName} 装饰图${json.check && !json.check.ok ? `（但门窗没通过核对：${(json.check.issues as string[]).join('、')}）` : ''}`, imageUrl: json.url || `data:image/png;base64,${json.b64_json}` }]);
         // 持久化替换结果（覆盖式，刷新后不丢）
-        void persistDecorations(nextImgs);
       } else {
         setChatMessages(prev => [...prev, { role: 'assistant', content: '生成失败：' + (json.error ?? '未知错误') }]);
       }
@@ -372,7 +392,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   }
 
   // 恢复某个历史版本：它成为当前图，原来的当前图进入历史（版本一个都不丢）
-  function restoreVersion(k: number) {
+  async function restoreVersion(k: number) {
     const cur = decorations[selectedIdx];
     const chosen = cur?.history?.[k];
     if (!cur || !chosen || chatBusy) return;
@@ -381,8 +401,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       { ...cur, history: (cur.history ?? []).filter((_, j) => j !== k) },
     );
     const nextImgs = decorations.map((d, i) => (i === selectedIdx ? restored : d));
-    setDecorations(nextImgs);
-    void persistDecorations(nextImgs);
+    setChatBusy(true);
+    try { await persistDecorations(nextImgs); setDecorations(nextImgs); }
+    catch { window.alert('历史版本恢复失败，请重试'); }
+    finally { setChatBusy(false); }
   }
 
   useEffect(() => {
@@ -422,6 +444,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     };
   }, [id]);
 
+  if (loadError && !data) return <main className="container"><p role="alert">{loadError}</p><a href="/">返回首页登录</a></main>;
   if (!data) {
     return (
       <div className="container" style={{ padding: 80, textAlign: 'center', color: 'var(--text-dim)' }}>
@@ -438,13 +461,20 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const byKind = (k: string) => data.results.find(r => r.kind === k)?.content as Record<string, unknown> | undefined;
 
   const plan = byKind('plan') as { rooms?: PlanRoom[]; geometry?: PlanGeometry; note?: string; warnings?: string[] } | undefined;
+  const savedSceneModel = byKind('scene_model') as SceneModel | undefined;
   const design = byKind('design') as { svg?: string; note?: string } | undefined;
-  const quote = byKind('quote') as { items?: { item: string; qty: number; unit: string; price?: number; total: number }[]; total?: number; weeks?: number; schedule?: { phase: string; weeks: number }[] } | undefined;
-  const match = byKind('match') as { contractors?: { id?: number | string; bidId?: number; name: string; rating?: number; score?: number; reason: string; districts?: string[]; types?: string[]; verified?: boolean; amount?: string | number; weeks?: string | number }[]; note?: string; source?: string; bidCount?: number } | undefined;
+  const quote = byKind('quote') as { items?: { item: string; qty: number; unit: string; price?: number; total: number; source?: string }[]; total?: number; note?: string; weeks?: number; schedule?: { phase: string; weeks: number }[] } | undefined;
+  const match = byKind('match') as { contractors?: { id?: number | string; bidId?: number; name: string; rating?: number; score?: number; reason: string; districts?: string[]; types?: string[]; verified?: boolean; amount?: string | number; weeks?: string | number; membershipTier?: string; customerResourceLevel?: string; ruleScore?: number }[]; note?: string; source?: string; bidCount?: number;
+    matchedBy?: 'mimo' | 'rules'; summary?: string;
+    products?: { id: string; name: string; category: string; imageUrl: string; officialUrl: string; room: string; reason: string }[] } | undefined;
 
   const doneCount = STAGES.filter(s => done.has(s.key)).length;
   const progress = Math.round((doneCount / STAGES.length) * 100);
   const totalArea = plan?.rooms?.reduce((s, r) => s + r.area, 0) ?? 0;
+  const activeSceneModel: SceneModel | undefined = customGeom
+    ? buildSceneModel(customGeom, customGeom.rooms, data.project.style, { source: 'floor_plan' })
+    : savedSceneModel;
+  const materialPrompt = activeSceneModel ? describeMaterialPreset(activeSceneModel.materialPreset) : '';
 
   // 异常横幅（EXCEPTION_RULES）：等待用户补充 / 升级老板裁决 / 降级交付
   const waitingTasks = data.tasks.filter(t => t.status === 'waiting_user');
@@ -481,10 +511,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: Number(id), homeownerId: readUser().id }),
       });
-      if (res.ok) setOrder((await res.json()) as OrderData);
-    } catch {
-      /* ignore */
-    }
+      if (!res.ok) throw new Error((await res.json()).error || '操作失败');
+      setOrder((await res.json()) as OrderData);
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
   };
 
   const chooseBid = async (bid: BidData) => {
@@ -500,10 +529,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           bidWeeks: bid.weeks,
         }),
       });
-      if (res.ok) setOrder((await res.json()) as OrderData);
-    } catch {
-      /* ignore */
-    }
+      if (!res.ok) throw new Error((await res.json()).error || '操作失败');
+      setOrder((await res.json()) as OrderData);
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
   };
 
   const confirmSide = async (signer: 'homeowner' | 'company') => {
@@ -514,20 +542,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signer }),
       });
-      if (res.ok) setOrder((await res.json()) as OrderData);
-    } catch {
-      /* ignore */
-    }
+      if (!res.ok) throw new Error((await res.json()).error || '操作失败');
+      setOrder((await res.json()) as OrderData);
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
   };
 
   const generateContract = async () => {
     if (!order) return;
     try {
       const res = await fetch('/api/orders/' + order.id + '/contract', { method: 'POST' });
-      if (res.ok) setContract((await res.json()) as ContractData);
-    } catch {
-      /* ignore */
-    }
+      if (!res.ok) throw new Error((await res.json()).error || '合同操作失败');
+      setContract((await res.json()) as ContractData);
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
   };
 
   const signContract = async (signer: 'homeowner' | 'company') => {
@@ -538,15 +564,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signer }),
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error((await res.json()).error || '签约失败');
       const updated = (await res.json()) as ContractData;
       setContract(updated);
       // 双方签署后由服务端把订单置为已签约，这里重新读取
       const orderRes = await fetch('/api/orders/' + order.id);
       if (orderRes.ok) setOrder((await orderRes.json()) as OrderData);
-    } catch {
-      /* ignore */
-    }
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
   };
 
   // 用户补充/确认后恢复等待中的任务（reask_user → 续跑流水线）
@@ -568,9 +592,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         router.push('/dashboard');
         return;
       }
-    } catch {
-      /* ignore */
-    }
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败，请重试'); }
     setDelBusy(false);
   };
 
@@ -692,9 +714,19 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           projectId={Number(id)}
           totalArea={Number(data.project.area) || undefined}
           initial={fpData}
-          onApply={(g) => {
+          onApply={async (g) => {
+            if (!g) return;
+            const localScene = buildSceneModel(g, g.rooms, data.project.style, { source: 'floor_plan' });
+            const response = await fetch(`/api/projects/${id}/results`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ kind: 'scene_model', upsert: true, content: localScene }),
+            });
+            if (!response.ok) throw new Error('3D 保存失败');
             setCustomGeom(g);
             setFpSource('user');
+            const rerun = await fetch(`/api/projects/${id}/replan`, { method: 'POST' });
+            if (!rerun.ok) throw new Error('设计与报价任务提交失败，请重试');
           }}
           onRooms={handleRooms}
           onStdImage={handleStd}
@@ -755,7 +787,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </>
         ) : design?.svg ? (
           <>
-            <div dangerouslySetInnerHTML={{ __html: design.svg }} style={{ overflowX: 'auto', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 10 }} />
+            <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(design.svg)}`} alt="二维设计图" style={{ width: '100%', border: '1px solid var(--border-strong)', borderRadius: 12 }} />
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>{design.note}</p>
           </>
         ) : (
@@ -928,8 +960,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <div className="accent-bar" />
-              3D 空间建模（2D→3D 同源重建）
-              <small>{useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION'}</small>
+              3D 设计模型（户型 · 材质 · 家具）
+              <small>{activeSceneModel ? `SCENE MODEL → ${activeSceneModel.materialPreset.name} · GLB / BLENDER / PASCAL` : (useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION')}</small>
             </div>
             {customGeom && plan?.geometry && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -940,8 +972,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               </div>
             )}
             <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>Loading 3D...</div>}>
-              <Scene3D geometry={effGeom} rooms={effRooms} />
+              <Scene3D geometry={effGeom} rooms={effRooms} presetId={activeSceneModel?.materialPresetId as MaterialPresetId | undefined}
+                onPresetChange={async materialPresetId => {
+                  const response = await fetch('/api/pascal/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: Number(id), sceneModel: activeSceneModel, action: { type: 'set_material_preset', materialPresetId } }) });
+                  if (!response.ok) throw new Error('材质保存失败');
+                }} />
             </Suspense>
+            <PascalBridge
+              projectId={Number(id)}
+              sceneModel={activeSceneModel}
+              onImported={(model) => {
+                setCustomGeom(model.geometry);
+                setFpSource('user');
+              }}
+            />
             {effWarnings.length > 0 && (
               <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>
                 ⚠ ForgeFloor 校验提示：{effWarnings.join('；')}
@@ -965,7 +1010,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <tbody>
               {quote.items.map((it, i) => (
                 <tr key={i}>
-                  <td>{it.item}</td>
+                  <td>{it.item}{it.source && <div style={{ color: 'var(--text-dim)', fontSize: 10, marginTop: 2 }}>依据：{it.source}</div>}</td>
                   <td>{it.qty}{it.unit}</td>
                   <td>¥{(it.price ?? 0).toLocaleString()}</td>
                   <td style={{ textAlign: 'right' }}>¥{it.total.toLocaleString()}</td>
@@ -982,6 +1027,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 10 }}>
             工期：{quote.schedule?.map(s => `${s.phase} ${s.weeks}周`).join(' → ')}
           </p>
+          {quote.note && <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 4 }}>{quote.note}</p>}
 
           {/* 用户调价 + 最终确认（人工动作） */}
           <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-strong)', background: 'var(--accent-soft)' }}>
@@ -1026,13 +1072,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <div className="panel-title">
             <div className="accent-bar" />
             匹配的装修队
-            <small>匹配师「小桥」按真实投标匹配 · 脱敏信息</small>
+            <small>{match!.matchedBy === 'mimo' ? '第二智能体「小桥」· MiMo 按真实投标匹配' : '匹配师「小桥」按规则评分匹配'} · 脱敏信息</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0 4px' }}>
             <AgentAvatar agentKey="matcher" size={40} />
             <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
-              <b>小桥 · 匹配师</b>
-              <span style={{ color: 'var(--text-dim)' }}>　基于装修公司发布的真实投标数据（报价 / 工期）+ 资质档案（人工审核状态 / 风格专长 / 服务范围）打分匹配；资质审核仅老板人工，选定装修队由业主决定</span>
+              <b>小桥 · 匹配智能体{match!.matchedBy === 'mimo' ? '（MiMo）' : ''}</b>
+              <span style={{ color: 'var(--text-dim)' }}>　{match!.matchedBy === 'mimo'
+                ? (match!.summary || 'MiMo 阅读你的需求、户型和报价，对已审核且会员有效的装修队真实投标逐一评估排序。')
+                : (match!.summary || '基于真实投标（报价 / 工期）与资质档案打分匹配。')}选定装修队由你决定。</span>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginTop: 14 }}>
@@ -1044,6 +1092,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
                   <span className={`tag ${c.verified ? 'tag-green' : 'tag-cyan'}`}>{c.verified ? '✓ 资质已人工审核' : '◌ 资质待审核'}</span>
+                  <span className="tag tag-purple">{getMembershipTier(c.membershipTier).badge}</span>
                   {c.amount != null && c.weeks != null && <span className="tag tag-orange">投标 ¥{c.amount} · {c.weeks} 周</span>}
                   {c.types?.map(t => <span key={t} className="tag tag-purple">{t}</span>)}
                   {c.districts?.map(d => <span key={d} className="tag tag-cyan">📍{d}</span>)}
@@ -1054,6 +1103,23 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               </div>
             ))}
           </div>
+          {!!match!.products?.length && (
+            <div style={{ marginTop: 18 }}>
+              <b style={{ fontSize: 13 }}>小桥为各房间挑选的智能家居</b>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 10 }}>
+                {match!.products.map(p => (
+                  <a key={p.id} href={p.officialUrl} target="_blank" rel="noreferrer" className="contractor-card" style={{ display: 'flex', gap: 10, alignItems: 'center', textDecoration: 'none', color: 'inherit' }}>
+                    <img src={p.imageUrl} alt="" loading="lazy" style={{ width: 56, height: 56, objectFit: 'contain', background: '#eeeae2', borderRadius: 8, flexShrink: 0 }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{p.room} · {p.category}</div>
+                      {p.reason && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{p.reason}</div>}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           {match!.note && <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 12 }}>{match!.note}</p>}
         </section>
       )}
@@ -1104,8 +1170,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         {/* 阶段日志：每个数字员工头像 + 名字 */}
         {STAGES.map((s) => {
           const a = agentOf(s.key);
-          const status = done.has(s.key) ? 'done' : running.has(s.key) ? 'running' : failed.has(s.key) ? 'failed' : 'pending';
-          const task = data.tasks.find(t => t.toAgent === s.key);
+          // 以该智能体最新一次任务为准：重跑后不再显示旧任务的状态
+          const task = data.tasks.filter(t => t.toAgent === s.key).sort((x, y) => y.id - x.id)[0];
+          const status = !task ? 'pending' : task.status === 'done' ? 'done' : task.status === 'running' ? 'running'
+            : task.status === 'failed' ? 'failed' : task.status === 'waiting_user' ? 'waiting' : task.status === 'escalated' ? 'escalated' : 'pending';
           return (
             <div key={s.key} className="timeline-item" style={{ opacity: status === 'pending' ? 0.5 : 1 }}>
               <div className={'timeline-dot ' + (status === 'pending' ? '' : status)} style={status === 'pending' ? { background: 'var(--border-strong)' } : undefined} />
@@ -1117,7 +1185,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     {status === 'done' && <span style={{ color: 'var(--accent3)' }}>&#10003; 已完成</span>}
                     {status === 'running' && <span style={{ color: 'var(--accent)' }}>&#9679; 执行中...</span>}
                     {status === 'failed' && <span style={{ color: 'var(--accent-danger)' }}>&#10007; 失败</span>}
-                    {status === 'pending' && <span>&#9711; 等待中</span>}
+                    {status === 'waiting' && <span style={{ color: 'var(--accent-warn)' }}>⏳ 等待您补充：{String(task?.output?.ask ?? task?.output?.exception?.detail ?? '请补充信息后继续')}</span>}
+                    {status === 'escalated' && <span style={{ color: 'var(--accent-warn)' }}>⚠ 已转平台人工处理</span>}
+                    {status === 'pending' && <span>&#9711; {task ? '排队中' : '等待上一步完成'}</span>}
                     {task && <span style={{ marginLeft: 8 }}>Task #{task.id}</span>}
                   </div>
                 </div>
@@ -1128,7 +1198,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         {!match && (
           <div style={{ textAlign: 'center', padding: '18px 0 6px' }}>
             <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1s infinite', marginRight: 8, verticalAlign: 'middle' }} />
-            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>Agent 流水线执行中 — 上方日志实时刷新</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{waitingTasks.length ? '流水线已暂停 — 请按上方提示补充户型信息（上传户型图，或在画板标注房间后点「按此图生成 3D」）' : escalatedTasks.length ? '流水线已暂停 — 等待平台人工处理' : 'Agent 流水线执行中 — 上方日志实时刷新'}</span>
           </div>
         )}
       </section>

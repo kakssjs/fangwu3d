@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createProject, getProjectsByHomeowner } from '@i-renovation/shared';
 import { requireSession } from '@/lib/auth';
 
@@ -16,7 +17,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const s = await requireSession(req, ['homeowner']); if (s instanceof NextResponse) return s;
-  const form = await req.formData();
+  let form: FormData;
+  try { form = await req.formData(); } catch { return NextResponse.json({ error: '请使用项目表单提交' }, { status: 400 }); }
   const name = String(form.get('name') ?? '').trim();
   const style = String(form.get('style') ?? '现代简约');
   const budget = String(form.get('budget') ?? '');
@@ -25,16 +27,27 @@ export async function POST(req: Request) {
   const homeownerId = s.uid;
   const file = form.get('floorPlan') as File | null;
 
-  if (!name) return NextResponse.json({ error: '请填写项目名称' }, { status: 400 });
+  const requestKey = String(form.get('requestKey') ?? '');
+  if (!name || name.length > 120 || style.length > 80 || budget.length > 64 || needs.length > 5000 || requestKey.length > 80 || (area && (!Number.isFinite(Number(area)) || Number(area) <= 0 || Number(area) > 10000))) return NextResponse.json({ error: '请检查项目名称、面积和说明长度' }, { status: 400 });
 
   let floorPlanPath: string | undefined;
+  try {
   if (file && file.size > 0) {
-    const dir = path.join(process.cwd(), '..', '..', 'uploads');
+    if (!(file instanceof File) || file.size > 10 * 1024 * 1024) return NextResponse.json({ error: '户型图不得超过 10MB' }, { status: 413 });
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const ext = bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'png' : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'jpg' : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
+    if (!ext) return NextResponse.json({ error: '请上传有效的 PNG、JPEG 或 WebP 户型图' }, { status: 400 });
+    const dir = process.env.IRENO_UPLOAD_DIR || path.join(process.cwd(), '..', '..', 'uploads');
     fs.mkdirSync(dir, { recursive: true });
-    floorPlanPath = path.join(dir, `${Date.now()}_${file.name}`);
-    fs.writeFileSync(floorPlanPath, Buffer.from(await file.arrayBuffer()));
+    floorPlanPath = path.join(dir, `${randomUUID()}.${ext}`);
+    fs.writeFileSync(floorPlanPath, bytes);
   }
 
-  const project = await createProject({ name, style, budget, area, needs, floorPlanPath, homeownerId });
+  const project = await createProject({ name, style, budget, area, needs, floorPlanPath, homeownerId, requestKey: requestKey || undefined });
+  if (floorPlanPath && project.floorPlanPath !== floorPlanPath) fs.unlinkSync(floorPlanPath);
   return NextResponse.json({ id: project.id });
+  } catch {
+    if (floorPlanPath) { try { fs.unlinkSync(floorPlanPath); } catch {} }
+    return NextResponse.json({ error: '项目保存失败，请稍后重试；不会重复创建同一请求' }, { status: 503 });
+  }
 }

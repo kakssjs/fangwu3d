@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createOrder, getProject, listOrdersByHomeowner, listOrdersByCompany, listOpenOrders } from '@i-renovation/shared';
+import { createOrder, getProject, getResult, getUser, listOrdersByHomeowner, listOrdersByCompany, listOpenOrders } from '@i-renovation/shared';
 import { forbidden, requireSession } from '@/lib/auth';
 
 export async function POST(req: Request) {
@@ -11,6 +11,9 @@ export async function POST(req: Request) {
     // 只能为自己的项目发布订单
     const project = await getProject(projectId);
     if (!project || project.homeownerId !== s.uid) return forbidden();
+    const qa = (await getResult(projectId, 'qa'))?.content as { passed?: boolean } | undefined;
+    if (!qa?.passed) return NextResponse.json({ error: '请先完成设计质检' }, { status: 409 });
+    if (!(await getResult(projectId, 'decision'))) return NextResponse.json({ error: '请先确认设计与报价' }, { status: 409 });
     const homeownerId = s.uid;
 
     const order = await createOrder({ projectId, homeownerId, status: 'open' });
@@ -41,6 +44,11 @@ export async function GET(req: Request) {
     }
     if (status === 'open') {
       if (s.role === 'homeowner') return forbidden();
+      if (s.role === 'company') {
+        const company = await getUser(s.uid);
+        if (company?.verified !== 1) return NextResponse.json({ error: '请先完成企业资质审核' }, { status: 403 });
+        if (company.membershipStatus !== 'active' || !company.membershipExpiresAt || Date.parse(company.membershipExpiresAt) <= Date.now()) return NextResponse.json({ error: '开通有效企业会员后可查看接单市场' }, { status: 402 });
+      }
       return NextResponse.json(await listOpenOrders());
     }
     return NextResponse.json({ error: '请指定 role=homeowner|company 或 status=open' }, { status: 400 });

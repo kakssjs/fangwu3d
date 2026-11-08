@@ -10,8 +10,10 @@
     "dev": "npm run dev -w apps/web",
     "dev:worker": "npm run dev -w apps/worker",
     "build": "npm run build -w apps/web && npm run build -w apps/worker",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --test scripts/regression.cjs"
   },
+  "engines": { "node": ">=24" },
   "devDependencies": {
     "typescript": "^5.6.0"
   }

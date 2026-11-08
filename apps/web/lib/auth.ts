@@ -81,13 +81,21 @@ function sign(payload: string): string {
   return crypto.createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
+/** 用会话密钥做的带密钥摘要（存邮箱验证码、限额键时用，数据库泄露也反推不出验证码）。 */
+export function keyedHash(text: string): string {
+  return crypto.createHmac('sha256', secret()).update(`email-code\0${text}`).digest('hex');
+}
+
 export function setSessionCookie(res: NextResponse, uid: number, role: Role): void {
   const session: Session = { uid, role, exp: Math.floor(Date.now() / 1000) + MAX_AGE_S };
   const payload = Buffer.from(JSON.stringify(session)).toString('base64url');
   res.cookies.set(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // HTTP 部署时不要强制 Secure Cookie，否则浏览器不会保存登录状态；HTTPS 部署可设置 COOKIE_SECURE=true。
+    secure: process.env.COOKIE_SECURE
+      ? process.env.COOKIE_SECURE === 'true'
+      : process.env.NODE_ENV === 'production' && (process.env.PUBLIC_BASE_URL ?? '').startsWith('https://'),
     path: '/',
     maxAge: MAX_AGE_S,
   });
@@ -103,11 +111,11 @@ export function readSession(req: Request): Session | null {
   const [payload, mac] = raw.split('.');
   if (!payload || !mac) return null;
   const expected = sign(payload);
-  if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
+  if (Buffer.byteLength(mac) !== Buffer.byteLength(expected) || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
   try {
     const s = JSON.parse(Buffer.from(payload, 'base64url').toString()) as Session;
     if (!s || typeof s.uid !== 'number' || !['homeowner', 'company', 'boss'].includes(s.role)) return null;
-    if (s.exp < Math.floor(Date.now() / 1000)) return null;
+    if (!Number.isSafeInteger(s.uid) || s.uid < 0 || (s.role !== 'boss' && s.uid === 0) || !Number.isFinite(s.exp) || s.exp < Math.floor(Date.now() / 1000)) return null;
     return s;
   } catch {
     return null;
@@ -151,9 +159,12 @@ export function isOrderParty(s: Session, order: OrderRow): boolean {
 /** 公司可查看订单：公开招标中、已被选定、或本公司投过标。 */
 export async function companyCanSeeOrder(s: Session, order: OrderRow): Promise<boolean> {
   if (s.role !== 'company') return false;
-  if (order.status === 'open' || order.companyId === s.uid) return true;
+  if (order.companyId === s.uid) return true;
   const bids = await listBidsByOrder(order.id);
-  return bids.some(b => b.companyId === s.uid);
+  if (bids.some(b => b.companyId === s.uid)) return true;
+  const company = await getUser(s.uid);
+  return order.status === 'open' && company?.verified === 1 && company.membershipStatus === 'active' &&
+    !!company.membershipExpiresAt && Date.parse(company.membershipExpiresAt) > Date.now();
 }
 
 /** 查看项目：业主本人、老板；公司仅限已发布到接单市场且自己可见的项目。 */

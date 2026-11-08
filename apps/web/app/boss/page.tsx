@@ -14,6 +14,15 @@ interface OrderRecord {
   bidAmount: string | null; bidWeeks: string | null; matchScore: string | null;
   createdAt: string; contractedAt: string | null;
 }
+interface CommissionSettlement {
+  id: number; orderId: number; bidId: number; companyId: number; companyName: string;
+  revenueCny: number; estimatedCostCny: number; profitCny: number; commissionRatePct: number;
+  platformCommissionCny: number; contractorNetProfitCny: number; status: string; createdAt: string; settledAt?: string | null;
+}
+interface MembershipPayment {
+  id: number; companyId: number; companyName: string; tier: string; billingCycle?: string; periodMonths?: number; amountCny: number;
+  status: string; paymentReference?: string | null; createdAt: string; paidAt?: string | null;
+}
 interface BossData {
   projects: { id: number; name: string; style: string; budget: string; area: string | null; stage: number; createdAt: string }[];
   tasks: TaskRecord[];
@@ -23,6 +32,8 @@ interface BossData {
   };
   orders: OrderRecord[];
   approvals: Approval[];
+  membershipPayments?: MembershipPayment[];
+  commissionSettlements?: CommissionSettlement[];
 }
 
 const AGENT_LABEL: Record<string, string> = {
@@ -56,9 +67,10 @@ function levelTag(level: string) {
 }
 
 export default function BossConsole() {
-  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders'>('approvals');
+  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders' | 'membership' | 'commissions'>('approvals');
+  const [membershipBusy, setMembershipBusy] = useState<number | null>(null);
   const [data, setData] = useState<BossData | null>(null);
-  const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
   const [filterAgent, setFilterAgent] = useState<string>('all');
   const [denied, setDenied] = useState(false);
 
@@ -73,6 +85,38 @@ export default function BossConsole() {
     timer = setInterval(load, 3000);
     return () => clearInterval(timer);
   }, []);
+
+  async function settleCommission(settlementId: number, action: 'settle' | 'cancel') {
+    setMembershipBusy(settlementId);
+    try {
+      const result = await fetch('/api/commissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settlementId, action }),
+      });
+      if (!result.ok) throw new Error((await result.json()).error || '结算确认失败');
+      const res = await fetch('/api/boss');
+      if (res.ok) setData(await res.json());
+    } catch (error) { window.alert(error instanceof Error ? error.message : '操作失败'); } finally {
+      setMembershipBusy(null);
+    }
+  }
+
+  async function decideApproval(item: Approval, action: 'approve' | 'reject') {
+    setApprovalBusy(item.id);
+    try {
+      const [kind, id] = item.id.split('_');
+      const response = await fetch(kind === 'user' ? `/api/users/${id}/verify` : '/api/boss', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kind === 'user' ? { action } : { taskId: Number(id), action: action === 'approve' ? 'retry' : 'dismiss' }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || '裁决失败');
+      const refreshed = await fetch('/api/boss');
+      if (!refreshed.ok) throw new Error('裁决已提交，列表刷新失败，请刷新页面');
+      setData(await refreshed.json());
+    } catch (error) { window.alert(error instanceof Error ? error.message : '裁决失败'); }
+    finally { setApprovalBusy(null); }
+  }
 
   const costs = data?.costs;
   const maxTokens = Math.max(1, ...(costs?.byAgent.map(a => a.tokens) ?? [1]));
@@ -116,7 +160,7 @@ export default function BossConsole() {
           <div className="value cyan">{data?.projects.length ?? '-'}</div>
         </div>
         <div className="stat-card">
-          <div className="label">Token 消耗</div>
+          <div className="label">任务 Token</div>
           <div className="value purple">{(costs?.totalTokens ?? 0).toLocaleString()}</div>
         </div>
         <div className="stat-card">
@@ -131,6 +175,8 @@ export default function BossConsole() {
           { key: 'tasks', label: '任务记录' },
           { key: 'costs', label: '成本看板' },
           { key: 'orders', label: '订单（第一单）' },
+          { key: 'membership', label: '入驻费 / 会员' },
+          { key: 'commissions', label: '利润分成' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -164,17 +210,14 @@ export default function BossConsole() {
                   {levelTag(item.level)}
                 </div>
                 <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 10 }}>{item.detail}</p>
-                {decisions[item.id] ? (
-                  <span className={decisions[item.id] === 'approved' ? 'tag tag-green' : 'tag tag-orange'}>
-                    {decisions[item.id] === 'approved' ? '已通过' : '已驳回'}
-                  </span>
-                ) : (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 14px' }}
-                      onClick={() => setDecisions(p => ({ ...p, [item.id]: 'approved' }))}>通过</button>
-                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 14px' }}
-                      onClick={() => setDecisions(p => ({ ...p, [item.id]: 'rejected' }))}>驳回</button>
-                    <span style={{ color: 'var(--text-dim)', fontSize: 11, marginLeft: 6 }}>{item.action}</span>
+                {item.id.startsWith('order_') ? <button className="btn" onClick={() => setTab('orders')}>查看订单跟进</button> : (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button className="btn btn-primary" disabled={approvalBusy !== null} onClick={() => void decideApproval(item, 'approve')}>
+                      {item.id.startsWith('user_') ? '通过资质审核' : '重试任务'}
+                    </button>
+                    <button className="btn btn-ghost" disabled={approvalBusy !== null} onClick={() => void decideApproval(item, 'reject')}>
+                      {item.id.startsWith('user_') ? '驳回资质' : '终止本次任务'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -238,7 +281,7 @@ export default function BossConsole() {
               <div className="value green">{costs?.doneCount ?? 0} / {costs?.failedCount ?? 0}</div>
             </div>
             <div className="stat-card">
-              <div className="label">Token 合计</div>
+              <div className="label">任务 Token 合计</div>
               <div className="value purple">{(costs?.totalTokens ?? 0).toLocaleString()}</div>
             </div>
             <div className="stat-card">
@@ -273,8 +316,77 @@ export default function BossConsole() {
               )}
             </div>
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 14 }}>
-              每单成本 = Token 成本 + 图像生成调用 → 用于校准定价（商业化评分：单位经济）
+              此处统计任务内 Token 和当前保存的效果图，不含手动生成、改图等全部调用；实际费用以模型服务商账单为准。
             </p>
+          </div>
+        </>
+      )}
+
+      {/* ---------- 入驻费 / 会员 ---------- */}
+      {tab === 'membership' && (
+        <>
+          <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 14 }}>
+            装修队入驻费与会员套餐由平台线下收款或支付网关确认。确认后才会开放客户资源、竞价资格与套餐加权。
+          </p>
+          <div className="panel">
+            <table className="data-table">
+              <thead><tr><th>公司</th><th>套餐</th><th>付费周期</th><th>入驻费</th><th>支付凭证</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>
+                {(data?.membershipPayments ?? []).map(p => (
+                  <tr key={p.id}>
+                    <td>{p.companyName}</td>
+                    <td>{p.tier}</td>
+                    <td>{p.billingCycle === 'monthly' ? '按月' : p.billingCycle === 'quarterly' ? '按季' : '按年'}</td>
+                    <td>¥{p.amountCny.toLocaleString()}</td>
+                    <td>{p.paymentReference?.startsWith('opcpay:') ? '支付宝购买入口' : p.paymentReference || '-'}</td>
+                    <td>{statusTag(p.status)}</td>
+                    <td>
+                      <span className="tag">{p.status === 'entitlement_confirmed' ? '权益已确认（非收款回执）' : p.status === 'paid' ? '历史已收款' : '由支付宝权益查询确认'}</span>
+                    </td>
+                  </tr>
+                ))}
+                {(data?.membershipPayments ?? []).length === 0 && (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无入驻费支付记录</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ---------- 利润分成 ---------- */}
+      {tab === 'commissions' && (
+        <>
+          <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 14 }}>
+            平台按装修队项目利润的 10% 提取服务费。未填写预计成本时，暂按成交金额估算利润；实际结算时可按真实成本复核。
+          </p>
+          <div className="stats-row" style={{ marginBottom: 16 }}>
+            <div className="stat-card"><div className="label">累计利润</div><div className="value green">¥{(data?.commissionSettlements ?? []).reduce((s, x) => s + x.profitCny, 0).toLocaleString()}</div></div>
+            <div className="stat-card"><div className="label">平台 10% 分成</div><div className="value purple">¥{(data?.commissionSettlements ?? []).reduce((s, x) => s + x.platformCommissionCny, 0).toLocaleString()}</div></div>
+            <div className="stat-card"><div className="label">待结算</div><div className="value orange">{(data?.commissionSettlements ?? []).filter(x => x.status === 'pending').length}</div></div>
+          </div>
+          <div className="panel">
+            <table className="data-table">
+              <thead><tr><th>订单</th><th>装修队</th><th>成交额</th><th>预估成本</th><th>利润</th><th>平台 10%</th><th>净利</th><th>操作</th></tr></thead>
+              <tbody>
+                {(data?.commissionSettlements ?? []).map(x => (
+                  <tr key={x.id}>
+                    <td>ORDER_{x.orderId}</td><td>{x.companyName}</td>
+                    <td>¥{x.revenueCny.toLocaleString()}</td><td>¥{x.estimatedCostCny.toLocaleString()}</td>
+                    <td>¥{x.profitCny.toLocaleString()}</td><td>¥{x.platformCommissionCny.toLocaleString()}</td><td>¥{x.contractorNetProfitCny.toLocaleString()}</td>
+                    <td>{x.status === 'pending' ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 9px' }} disabled={membershipBusy === x.id} onClick={() => void settleCommission(x.id, 'settle')}>确认结算</button>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }} disabled={membershipBusy === x.id} onClick={() => void settleCommission(x.id, 'cancel')}>作废</button>
+                      </div>
+                    ) : x.status === 'settled' ? <span className="tag tag-green">已结算</span> : <span className="tag tag-orange">已作废</span>}</td>
+                  </tr>
+                ))}
+                {(data?.commissionSettlements ?? []).length === 0 && (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无利润分成记录</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -302,7 +414,7 @@ export default function BossConsole() {
                   </tr>
                 ))}
                 {(data?.orders ?? []).length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>
                     暂无订单 — 业主在项目页「发布到接单市场」后生成
                   </td></tr>
                 )}

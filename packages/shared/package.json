@@ -19,6 +19,34 @@
     "./price": {
       "types": "./src/price.ts",
       "default": "./src/price.ts"
+    },
+    "./materials": {
+      "types": "./src/materials.ts",
+      "default": "./src/materials.ts"
+    },
+    "./scene3d": {
+      "types": "./src/scene3d.ts",
+      "default": "./src/scene3d.ts"
+    },
+    "./furniture": {
+      "types": "./src/furniture.ts",
+      "default": "./src/furniture.ts"
+    },
+    "./membership": {
+      "types": "./src/membership.ts",
+      "default": "./src/membership.ts"
+    },
+    "./commission": {
+      "types": "./src/commission.ts",
+      "default": "./src/commission.ts"
+    },
+    "./fair-bidding": {
+      "types": "./src/fair-bidding.ts",
+      "default": "./src/fair-bidding.ts"
+    },
+    "./marketplace": {
+      "types": "./src/marketplace.ts",
+      "default": "./src/marketplace.ts"
     }
   }
 }

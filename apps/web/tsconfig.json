@@ -31,9 +31,21 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-live/types/**/*.ts",
+    ".next-opcpay/types/**/*.ts",
+    ".next-v3/types/**/*.ts",
+    ".next-v3b/types/**/*.ts",
+    ".next-v3c/types/**/*.ts",
+    ".next-v3d/types/**/*.ts",
+    ".next-v3e/types/**/*.ts",
+    ".next-v3f/types/**/*.ts",
+    ".next-v3g/types/**/*.ts",
+    ".next-v3h/types/**/*.ts",
+    ".next-v3i/types/**/*.ts",
+    ".next-v3j/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-live/types/**/*.ts"
+    ".next-v3k/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

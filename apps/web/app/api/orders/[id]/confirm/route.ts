@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getOrder, updateOrder } from '@i-renovation/shared';
+import { getOrder, confirmOrder } from '@i-renovation/shared';
 import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -15,27 +15,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (!isOrderParty(s, order)) return forbidden();
     const signer = s.role as 'homeowner' | 'company';
 
-    const ts = new Date().toISOString();
-    const patch: Parameters<typeof updateOrder>[1] = {};
-
-    if (signer === 'homeowner') {
-      patch.homeownerConfirmedAt = ts;
-    } else {
-      patch.companyConfirmedAt = ts;
-    }
-
-    const homeownerConfirmedAt = signer === 'homeowner' ? ts : (order.homeownerConfirmedAt ?? null);
-    const companyConfirmedAt = signer === 'company' ? ts : (order.companyConfirmedAt ?? null);
-
-    if (homeownerConfirmedAt && companyConfirmedAt) {
-      patch.confirmedAt = ts;
-      patch.status = 'confirmed';
-    } else {
-      patch.status = `${signer}_confirmed`;
-    }
-
-    await updateOrder(id, patch);
-    const updated = await getOrder(id);
+    const updated = await confirmOrder(id, signer);
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ error: '确认失败' }, { status: 400 });

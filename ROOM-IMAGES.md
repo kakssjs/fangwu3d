@@ -1,8 +1,8 @@
 # Room images: history, layout consistency, doors and windows, proxy fix
 
 Technical record of changes to the room-rendering panel on the project page
-(`apps/web/app/project/[id]/page.tsx`) and the floor-plan recognition behind it. State as of 2026-11-07. Nothing is committed yet;
-the folder is a git repository (`apps/web/.env.local` is gitignored — keys never reach git, verified with `git check-ignore`).
+(`apps/web/app/project/[id]/page.tsx`) and the floor-plan recognition behind it. State as of 2026-11-07. Nothing is committed; this folder
+is not a git repository.
 
 ## 1. Image history (new)
 
@@ -218,51 +218,3 @@ generation can now take longer when a retry is needed (up to about 1.5 minutes p
      would be quicker.
   3. The AI sometimes adds an unlisted door, and cannot show doors behind the camera. Choosing the
      camera direction to show the most doors, or generating two views per room, could help.
-
-## 8. DeepSeek as an automatic backup for MiMo (new)
-
-**Problem.** MiMo runs on competition-issued quota and could start erroring at any time. The owner
-provided a DeepSeek API key (2026-11-07) and asked for it to be wired in as a backup.
-
-**Now.** `lib/mimo.ts` calls a provider chain inside `callMimo`: **MiMo first, DeepSeek second**.
-When MiMo errors or answers empty, the same request is retried against DeepSeek automatically and
-the callers (recognition ×3 runs, `render-check`, the agent runner) notice nothing. Both providers
-are OpenAI-compatible and go through the same `curl` subprocess (proxy-aware, as in section 3).
-- Key in `apps/web/.env.local` as `DEEPSEEK_API_KEY` (gitignored). Optional overrides:
-  `DEEPSEEK_BASE_URL` (default `https://api.deepseek.com`), `DEEPSEEK_MODEL` (default `deepseek-flash`).
-- The fallback model `deepseek-flash` (DeepSeek-V4.1-Flash) accepts **images**, so the picture tasks —
-  floor-plan recognition and render checking — have a working backup too. Text-only models are only
-  used for text calls; image calls always pick a vision-capable model.
-- An empty answer counts as failure so the backup can take over. If both providers fail, the **MiMo**
-  error is thrown, keeping the runner's retry/degrade classification (section 6) unchanged.
-- DeepSeek's `reasoning_content` is its thinking process, not the answer (MiMo's quirk is the
-  opposite), so it is not used as an answer fallback for DeepSeek.
-
-**What the live probing found (2026-11-07, through real API calls):**
-- The key works (`GET /models` → 200). The current API serves `deepseek-flash` (text+image) and
-  `deepseek-v4-pro` (text only); the old `deepseek-chat`/`deepseek-reasoner` names are gone.
-- `deepseek-flash` thinks by default and can burn the whole `max_tokens` on thinking and return an
-  empty answer — the same failure MiMo had in section 4. The **same `thinking: {"type":"disabled"}`
-  switch as MiMo turns it off** (measured: `reasoning_tokens` 13 → 0). `effort` and
-  `enable_thinking` parameters do nothing (measured).
-- This PC's direct route to `api.deepseek.com` is slow and wobbly without the proxy (11.5 s for a
-  trivial call; one call exceeded the 65 s curl limit and was killed). DeepSeek calls now get a
-  120 s timeout; MiMo keeps its measured 65 s.
-
-**Verified (real runs, not simulated):**
-- `_e2e_deepseek.ts` (runs the real `callMimo`): 3/3 — MiMo still answers first when healthy (no
-  switch logged); with MiMo pointed at a dead address, a text call returned exactly `DEEPSEEK_OK`
-  from DeepSeek and an image call correctly summarised a screenshot, with the switch logged both times.
-- `_e2e_recognize.ts` against `next start` with MiMo dead: `POST /api/mimo/recognize` on a self-drawn
-  4-room / 6-window / 3-door plan answered **HTTP 200 in 7.6 s, 4 rooms and 8 openings, 3 of 3 runs
-  parsed**, and the server log shows the three fallback switches. (Room names on that unlabeled
-  drawing were guessed by the model — the geometry is what the test checks.)
-- `npx tsc -b` and `next build` pass; the build did not rewrite any config files this time.
-
-**Scope / limits.**
-- `apps/worker/src/mimo.ts` keeps its own text-only copy without the backup (production-split stub;
-  its `node:https` transport also ignores the proxy — pre-existing, section 3). If the worker is ever
-  put into service, port the same chain over.
-- DeepSeek's recognition accuracy has not been measured against the answer key the way MiMo's was
-  (section 4's 89%); it is wired for availability, not as a claimed quality upgrade.
-- All changes are uncommitted in the working tree.

@@ -9,4 +9,3 @@ uploads/
 # local database (accounts, projects) and build folders: never publish
 .pglite-data/
 .next*/
-.session-secret

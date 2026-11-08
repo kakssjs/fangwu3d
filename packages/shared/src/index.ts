@@ -73,3 +73,10 @@ export const FORBIDDEN_ACTIONS = ['take_payment', 'sign_contract', 'verify_contr
 /** 核心链路（开发计划 P1 的端到端流水线）：智能体逐个执行；
  *  matcher 不入链——等「业主确认发布 + 装修公司发布数据（投标）」后单独触发 */
 export const CORE_CHAIN = ['floor_plan', 'designer', 'quote', 'qa'] as const;
+export * from './materials';
+export * from './scene3d';
+export * from './furniture';
+export * from './membership';
+export * from './commission';
+export * from './fair-bidding';
+export * from './marketplace';

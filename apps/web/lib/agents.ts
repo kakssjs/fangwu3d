@@ -12,7 +12,7 @@ export const AGENTS: Record<string, AgentProfile> = {
   floor_plan: { key: 'floor_plan', name: '小测', role: '户型识别师', color: '#00b894', emoji: '📐' },
   designer: { key: 'designer', name: '小设', role: '设计师', color: '#0984e3', emoji: '🎨' },
   quote: { key: 'quote', name: '小算', role: '报价师', color: '#e17055', emoji: '🧮' },
-  matcher: { key: 'matcher', name: '小桥', role: '匹配师', color: '#00cec9', emoji: '🤝' },
+  matcher: { key: 'matcher', name: '小桥', role: '匹配智能体 · MiMo', color: '#00cec9', emoji: '🤝' },
   qa: { key: 'qa', name: '小检', role: '质检员', color: '#fdcb6e', emoji: '✅' },
 };
 

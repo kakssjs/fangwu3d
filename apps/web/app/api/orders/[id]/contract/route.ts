@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createContract, getContractByOrder, signContract, getOrder, getProject, getUser, updateOrder } from '@i-renovation/shared';
+import { createContract, getContractByOrder, signContract, getOrder, getProject, getUser } from '@i-renovation/shared';
+import { wanToCny } from '@i-renovation/shared/commission';
 import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 function buildContractText(params: {
@@ -56,7 +57,8 @@ function buildContractText(params: {
     '',
     '第十条  其他约定',
     `10.1  本合同一式两份，甲乙双方各执一份，自双方签署之日起生效。`,
-    `10.2  合同签订日期：${params.signDate}`,
+    '10.2  乙方同意按本项目实际利润的 10% 向平台支付信息服务费；未提供实际成本时，暂按成交金额估算利润，结算时可复核。',
+    `10.3  合同签订日期：${params.signDate}`,
     '',
     '附件：《施工项目清单》《材料清单》《付款节点约定》《竣工验收单》',
     '',
@@ -75,6 +77,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (!order) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
     if (!isOrderParty(s, order)) return forbidden();
 
+    if (!['confirmed', 'contracted'].includes(order.status)) return NextResponse.json({ error: '请先完成双方确认' }, { status: 409 });
+
     const body = (await req.json().catch(() => ({}))) as { signer?: string };
     // 签署合同：签署方 = 登录身份；请求里的 signer 只表示这是一次签署请求
     if (body.signer !== undefined) {
@@ -83,10 +87,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       if (!contract) return NextResponse.json({ error: '合同不存在，请先创建合同' }, { status: 404 });
       await signContract(contract.id, signer);
       const updated = await getContractByOrder(id);
-      // 双方都签署后，订单进入「已签约」
-      if (updated && updated.homeownerSigned === 1 && updated.companySigned === 1 && order.status !== 'contracted') {
-        await updateOrder(id, { status: 'contracted', contractedAt: new Date().toISOString() });
-      }
       return NextResponse.json(updated);
     }
 
@@ -104,8 +104,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       projectName: project?.name ?? '______________',
       homeownerName: homeowner?.name ?? '______________',
       companyName: company?.companyName ?? company?.name ?? order.bidNote ?? '______________',
-      amount: order.bidAmount ?? '______________',
-      weeks: order.bidWeeks ?? '______________',
+      amount: String(wanToCny(order.bidAmount ?? '0')),
+      weeks: String(Number(order.bidWeeks) * 7),
       signDate: new Date().toISOString().slice(0, 10),
     });
 

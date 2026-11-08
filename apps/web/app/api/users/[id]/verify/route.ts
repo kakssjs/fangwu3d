@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getUser, setUserVerified } from '@i-renovation/shared';
 import { requireSession } from '@/lib/auth';
 
-// ★ 资质审核 = 红线动作：仅老板人工决策，Agent 不得代为认证
+// 资质审核：企业付费会员确认后自动通过（lib/company-payment.ts）；老板仍可在这里人工通过或驳回
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const s = await requireSession(req, ['boss']); if (s instanceof NextResponse) return s;

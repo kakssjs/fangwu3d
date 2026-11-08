@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 type Step = 'choose' | 'homeowner' | 'company' | 'login' | 'done';
@@ -20,6 +20,9 @@ type HomeownerForm = {
 
 type CompanyForm = {
   name: string;
+  companyScale: 'small' | 'medium' | 'large' | 'enterprise';
+  membershipTier: 'basic' | 'professional' | 'elite';
+  billingCycle: 'monthly' | 'quarterly' | 'annual';
   companyName: string;
   phone: string;
   email: string;
@@ -95,6 +98,86 @@ const roleCardHoverStyle: React.CSSProperties = {
   boxShadow: 'var(--glow-cyan)',
 };
 
+/** 邮箱 + 「获取验证码」按钮 + 验证码输入。发送间隔以后端为准，倒计时只是提示。 */
+function EmailCodeInput({ email, onEmail, code, onCode, purpose, placeholder }: {
+  email: string; onEmail: (v: string) => void; code: string; onCode: (v: string) => void;
+  purpose: 'register' | 'login'; placeholder: string;
+}) {
+  const [left, setLeft] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (left <= 0) return;
+    const t = setTimeout(() => setLeft(left - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+
+  async function send() {
+    setNote('');
+    setSending(true);
+    try {
+      const res = await fetch('/api/auth/email/code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), purpose }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { resendAfterSeconds?: number; error?: string };
+      if (!res.ok) { setNote(data.error ?? '验证码发送失败，请稍后重试'); return; }
+      setLeft(data.resendAfterSeconds ?? 60);
+      setNote('验证码已发送，请查收邮件（也看看垃圾邮件箱），5 分钟内有效');
+    } catch {
+      setNote('网络异常，请稍后重试');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const looksValid = /^\S+@\S+\.\S+$/.test(email.trim());
+  return (
+    <>
+      <div className="form-group">
+        <label>邮箱 *</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            className="form-input"
+            required
+            type="email"
+            autoComplete="email"
+            placeholder={placeholder}
+            value={email}
+            onChange={(e) => onEmail(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={sending || left > 0 || !looksValid}
+            onClick={() => void send()}
+            style={{ whiteSpace: 'nowrap', fontSize: 12, padding: '6px 12px' }}
+          >
+            {sending ? '发送中…' : left > 0 ? `${left} 秒后重发` : '获取验证码'}
+          </button>
+        </div>
+        {note && <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: '6px 0 0' }}>{note}</p>}
+      </div>
+      <div className="form-group">
+        <label>邮箱验证码 *</label>
+        <input
+          className="form-input"
+          required
+          inputMode="numeric"
+          pattern="\d{6}"
+          maxLength={6}
+          autoComplete="one-time-code"
+          placeholder="6 位数字"
+          value={code}
+          onChange={(e) => onCode(e.target.value.replace(/\D/g, ''))}
+        />
+      </div>
+    </>
+  );
+}
+
 export default function RegisterModal({
   mode = 'register',
   onClose,
@@ -113,6 +196,19 @@ export default function RegisterModal({
   const [loginPhone, setLoginPhone] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
+  // 邮箱验证码：开启时注册必须验证邮箱，登录可以用邮箱验证码
+  const [emailOn, setEmailOn] = useState(false);
+  const [homeCode, setHomeCode] = useState('');
+  const [coCode, setCoCode] = useState('');
+  const [loginWith, setLoginWith] = useState<'phone' | 'email'>('phone');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginCode, setLoginCode] = useState('');
+  useEffect(() => {
+    fetch('/api/auth/email')
+      .then(r => r.json())
+      .then((d: { enabled?: boolean }) => setEmailOn(!!d.enabled))
+      .catch(() => {});
+  }, []);
 
   const [homeForm, setHomeForm] = useState<HomeownerForm>({
     name: '',
@@ -123,6 +219,9 @@ export default function RegisterModal({
 
   const [coForm, setCoForm] = useState<CompanyForm>({
     name: '',
+    companyScale: 'small',
+    membershipTier: 'basic',
+    billingCycle: 'monthly',
     companyName: '',
     phone: '',
     email: '',
@@ -152,6 +251,7 @@ export default function RegisterModal({
           name: homeForm.name,
           phone: homeForm.phone,
           email: homeForm.email,
+          emailCode: homeCode,
           password: homeForm.password,
         }),
       });
@@ -184,12 +284,16 @@ export default function RegisterModal({
           companyName: coForm.companyName,
           phone: coForm.phone,
           email: coForm.email,
+          emailCode: coCode,
           password: coForm.password,
           license: coForm.license,
           qualifications: splitList(coForm.qualifications),
           districts: splitList(coForm.districts),
           serviceTypes: splitList(coForm.serviceTypes),
           specialties: splitList(coForm.specialties),
+          companyScale: coForm.companyScale,
+          membershipTier: coForm.membershipTier,
+          billingCycle: coForm.billingCycle,
         }),
       });
       const data = (await res.json()) as { id?: number; role?: string; error?: string };
@@ -198,7 +302,7 @@ export default function RegisterModal({
         return;
       }
       setDoneUser({ id: data.id, role: data.role, name: coForm.name });
-      setDoneMessage('入驻申请已提交，平台审核通过后即可接单');
+      setDoneMessage('入驻申请已提交。开通会员套餐并完成入驻费支付后，即可获取平台客户资源并参与项目竞价。');
       setStep('done');
     } catch {
       setError('网络异常，请稍后重试');
@@ -212,17 +316,18 @@ export default function RegisterModal({
     setLoginBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const byEmail = emailOn && loginWith === 'email';
+      const res = await fetch(byEmail ? '/api/auth/email/login' : '/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: loginPhone, password: loginPassword }),
+        body: JSON.stringify(byEmail ? { email: loginEmail.trim(), code: loginCode } : { phone: loginPhone, password: loginPassword }),
       });
       const data = (await res.json()) as { id?: number; role?: string; name?: string; companyName?: string; error?: string };
       if (!res.ok || typeof data.id !== 'number') {
-        setError(data.error ?? '登录失败，请检查手机号和密码');
+        setError(data.error ?? (byEmail ? '登录失败，请检查邮箱和验证码' : '登录失败，请检查手机号和密码'));
         return;
       }
-      onSuccess({ id: data.id, role: data.role ?? 'homeowner', name: data.name ?? loginPhone, companyName: data.companyName });
+      onSuccess({ id: data.id, role: data.role ?? 'homeowner', name: data.name ?? (byEmail ? loginEmail : loginPhone), companyName: data.companyName });
     } catch {
       setError('网络异常，请稍后重试');
     } finally {
@@ -266,32 +371,51 @@ export default function RegisterModal({
 
         {step === 'login' && (
           <form onSubmit={submitLogin}>
-            <p style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.7, margin: '0 0 18px' }}>
-              使用注册时的手机号和密码登录
-            </p>
-            <div className="form-group">
-              <label>手机号</label>
-              <input
-                className="form-input"
-                required
-                type="tel"
-                placeholder="请输入注册手机号"
-                value={loginPhone}
-                onChange={(e) => setLoginPhone(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>密码</label>
-              <input
-                className="form-input"
-                required
-                type="password"
-                autoComplete="current-password"
-                placeholder="请输入密码"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-              />
-            </div>
+            {emailOn && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button type="button" className={loginWith === 'phone' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setLoginWith('phone'); }}>
+                  手机号密码登录
+                </button>
+                <button type="button" className={loginWith === 'email' ? 'btn btn-primary' : 'btn btn-ghost'}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 10px' }} onClick={() => { setError(''); setLoginWith('email'); }}>
+                  邮箱验证码登录
+                </button>
+              </div>
+            )}
+            {emailOn && loginWith === 'email' ? (
+              <EmailCodeInput email={loginEmail} onEmail={setLoginEmail} code={loginCode} onCode={setLoginCode}
+                purpose="login" placeholder="请输入注册时验证过的邮箱" />
+            ) : (
+              <>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.7, margin: '0 0 18px' }}>
+                  使用注册时的手机号和密码登录
+                </p>
+                <div className="form-group">
+                  <label>手机号</label>
+                  <input
+                    className="form-input"
+                    required
+                    type="tel"
+                    placeholder="请输入注册手机号"
+                    value={loginPhone}
+                    onChange={(e) => setLoginPhone(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>密码</label>
+                  <input
+                    className="form-input"
+                    required
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="请输入密码"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
             {error && (
               <p style={{ color: 'var(--accent-danger)', fontSize: 13, marginTop: -6, marginBottom: 12 }}>{error}</p>
             )}
@@ -374,16 +498,21 @@ export default function RegisterModal({
                 onChange={(e) => setHomeForm({ ...homeForm, phone: e.target.value })}
               />
             </div>
-            <div className="form-group">
-              <label>邮箱（选填）</label>
-              <input
-                className="form-input"
-                type="email"
-                placeholder="用于接收设计方案通知"
-                value={homeForm.email}
-                onChange={(e) => setHomeForm({ ...homeForm, email: e.target.value })}
-              />
-            </div>
+            {emailOn ? (
+              <EmailCodeInput email={homeForm.email} onEmail={(v) => setHomeForm({ ...homeForm, email: v })}
+                code={homeCode} onCode={setHomeCode} purpose="register" placeholder="用于登录和接收设计方案通知" />
+            ) : (
+              <div className="form-group">
+                <label>邮箱（选填）</label>
+                <input
+                  className="form-input"
+                  type="email"
+                  placeholder="用于接收设计方案通知"
+                  value={homeForm.email}
+                  onChange={(e) => setHomeForm({ ...homeForm, email: e.target.value })}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>密码 *（至少 8 位）</label>
               <input
@@ -417,6 +546,42 @@ export default function RegisterModal({
         {step === 'company' && (
           <form onSubmit={submitCompany}>
             <div className="form-group">
+              <label>团队规模 *</label>
+              <select
+                className="form-input"
+                value={coForm.companyScale}
+                onChange={(e) => {
+                  const companyScale = e.target.value as CompanyForm['companyScale'];
+                  setCoForm({ ...coForm, companyScale, membershipTier: 'basic' });
+                }}
+              >
+                <option value="small">小型装修队 · 1–10 人</option>
+                <option value="medium">中型装潢公司 · 10–50 人</option>
+                <option value="large">大型装潢企业 · 50–200 人</option>
+                <option value="enterprise">集团型工程企业 · 200 人以上</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>入驻套餐 *</label>
+              <select
+                className="form-input"
+                value={coForm.membershipTier}
+                onChange={(e) => setCoForm({ ...coForm, membershipTier: e.target.value as CompanyForm['membershipTier'] })}
+              >
+                <option value="basic">基础会员 · ¥39/月 · 30 条客户资源/月</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>付费方式 *</label>
+              <select
+                className="form-input"
+                value={coForm.billingCycle}
+                onChange={(e) => setCoForm({ ...coForm, billingCycle: e.target.value as CompanyForm['billingCycle'] })}
+              >
+                <option value="monthly">按月支付 · 到期主动购买，不自动扣费</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label>联系人姓名 *</label>
               <input
                 className="form-input"
@@ -447,16 +612,21 @@ export default function RegisterModal({
                 onChange={(e) => setCoForm({ ...coForm, phone: e.target.value })}
               />
             </div>
-            <div className="form-group">
-              <label>邮箱（选填）</label>
-              <input
-                className="form-input"
-                type="email"
-                placeholder="请输入邮箱"
-                value={coForm.email}
-                onChange={(e) => setCoForm({ ...coForm, email: e.target.value })}
-              />
-            </div>
+            {emailOn ? (
+              <EmailCodeInput email={coForm.email} onEmail={(v) => setCoForm({ ...coForm, email: v })}
+                code={coCode} onCode={setCoCode} purpose="register" placeholder="用于登录和接收订单通知" />
+            ) : (
+              <div className="form-group">
+                <label>邮箱（选填）</label>
+                <input
+                  className="form-input"
+                  type="email"
+                  placeholder="请输入邮箱"
+                  value={coForm.email}
+                  onChange={(e) => setCoForm({ ...coForm, email: e.target.value })}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>密码 *（至少 8 位）</label>
               <input

@@ -81,7 +81,7 @@ interface Props {
   projectId: number;
   totalArea?: number;
   initial?: StudioData | null;
-  onApply?: (geometry: PlanGeometry | null) => void;
+  onApply?: (geometry: PlanGeometry | null) => void | Promise<void>;
   onRooms?: (rects: StudioRect[]) => void;
   onStdImage?: (url: string | null) => void;
 }
@@ -373,8 +373,9 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
       setMsg('标准平面图已生成 — 已放入「Agent 施工图」（AI 生成 · 尺寸以现场量房为准）');
     } catch {
       setMsg('网络错误，Agnes 生成失败');
+    } finally {
+      setBusy('');
     }
-    setBusy('');
   }
 
   async function recognize() {
@@ -405,16 +406,18 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
         + ' — 可编辑名字/大小后生成渲染图与 3D');
     } catch {
       setMsg('网络错误，识别失败');
+    } finally {
+      setBusy('');
     }
-    setBusy('');
   }
 
-  function applyTo3D() {
+  async function applyTo3D() {
     if (rects.length === 0) { setMsg('请先框出或识别房间'); return; }
     setBusy('apply');
     try {
       const geometry = geometryFromStudioRects(rects, totalArea);
-      onApply?.(geometry);
+      if (!(await save())) return;
+      await onApply?.(geometry);
       setMsg(`已按此户型图生成 3D：开间 ${geometry.width}m × 进深 ${geometry.depth}m，${geometry.walls.length} 面墙${geometry.warnings.length ? `，${geometry.warnings.length} 条提示` : ''}`);
     } catch (err) {
       setMsg('3D 生成失败：' + (err as Error).message);
@@ -426,7 +429,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     setBusy('save');
     setMsg('');
     try {
-      await fetch(`/api/projects/${projectId}/results`, {
+      const response = await fetch(`/api/projects/${projectId}/results`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -439,11 +442,13 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
           },
         }),
       });
+      if (!response.ok) throw new Error((await response.json()).error || '保存失败');
       setMsg('已保存户型输入');
+      return true;
     } catch {
       setMsg('保存失败');
-    }
-    setBusy('');
+      return false;
+    } finally { setBusy(''); }
   }
 
   return (
@@ -524,7 +529,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
               · 图上蓝色是窗、橙色是门。AI 识别可能有错，请对照图纸检查，多的删掉、缺的补上
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 330px), 1fr))', gap: 10 }}>
             {rects.map(r => (
               <div key={r.id} style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--accent-soft)', fontSize: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>

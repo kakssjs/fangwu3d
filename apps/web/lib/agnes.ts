@@ -1,3 +1,4 @@
+import { httpsPost } from './mimo';
 // Agnes AI 图像生成客户端（官方文档端点：https://apihub.agnes-ai.com/v1/images/generations）
 const AGNES_BASE = process.env.AGNES_BASE_URL ?? 'https://apihub.agnes-ai.com';
 const AGNES_KEY = process.env.AGNES_API_KEY ?? '';
@@ -15,6 +16,7 @@ export async function generateImage(opts: {
   image?: string | string[];  // 图生图输入（URL 或 base64 Data URI）
   returnBase64?: boolean;
 }): Promise<AgnesImageResult> {
+  if (!AGNES_KEY) throw new Error('效果图服务尚未配置');
   const body: Record<string, unknown> = {
     model: 'agnes-image-2.5-flash',
     prompt: opts.prompt,
@@ -30,20 +32,12 @@ export async function generateImage(opts: {
   }
   if (opts.returnBase64) body.return_base64 = true;
 
-  const res = await fetch(`${AGNES_BASE}/v1/images/generations`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${AGNES_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Agnes API ${res.status}: ${text.slice(0, 200)}`);
-  }
-  const json = await res.json();
-  return json?.data?.[0] ?? {};
+  const res = await httpsPost(`${AGNES_BASE}/v1/images/generations`, body, {
+    Authorization: `Bearer ${AGNES_KEY}`, 'Content-Type': 'application/json',
+  }, 120000);
+  if (res.status < 200 || res.status >= 300) throw new Error(`Agnes API ${res.status}: ${res.body.slice(0, 200)}`);
+  const json = JSON.parse(res.body);
+  const image = json?.data?.[0];
+  if (!image?.url && !image?.b64_json) throw new Error('效果图服务没有返回图像');
+  return image;
 }

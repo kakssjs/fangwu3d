@@ -8,9 +8,11 @@ import { useEffect, useRef, useState } from 'react';
  * at the bottom, and a second video when the visitor scrolls.
  * The top bar floats over the video until the opening has scrolled past.
  */
-const VIDEO_BASE = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/';
-const FIRST_VIDEO = VIDEO_BASE + 'hf_20260625_174131_395bc785-bb21-4e65-abf6-27c56f0764b6.mp4';
-const SECOND_VIDEO = VIDEO_BASE + 'hf_20260624_055914_ee2b3b56-9a58-4885-989e-5b72a68b630d.mp4';
+// Served from our own server (public/videos): the overseas CDN copies were 15 MB and 43 MB (4K) and often
+// too slow in mainland China, so the second video never appeared. These are 1080p H.264, 4.3 MB and 6.4 MB,
+// with the index at the front so playback can start before the whole file has arrived.
+const FIRST_VIDEO = '/videos/landing-first.mp4';
+const SECOND_VIDEO = '/videos/landing-second.mp4';
 
 /**
  * Home-page call to action. Signed out: opens the top bar's register or login form.
@@ -43,40 +45,63 @@ export default function LeadHero() {
     if (!hero || !first || !second || !intro || !introImage) return;
     bar?.classList.add('over-hero');
 
-    // Opening stage, as in the studio: once the first video is playing, the
-    // living-room still closes through a turning circle to reveal it.
+    // Opening stage, as in the studio: once a video is actually playing, the living-room
+    // still closes through a turning circle to reveal it. Either video counts, so a page that
+    // loads already scrolled down doesn't stay stuck behind the still.
     const reveal = () => intro.classList.add('is-playing');
-    const onFirstPlaying = () => {
+    const onPlaying = () => {
       if (introImage.complete && introImage.naturalWidth) reveal();
       else introImage.addEventListener('load', reveal, { once: true });
     };
-    first.addEventListener('playing', onFirstPlaying, { once: true });
+    first.addEventListener('playing', onPlaying, { once: true });
+    second.addEventListener('playing', onPlaying, { once: true });
+
+    // Start downloading the second video as soon as the first plays, so it is ready by the time
+    // the visitor scrolls (it used to start loading only on scroll).
+    const preloadSecond = () => {
+      if (second.paused && second.readyState < 3) { second.preload = 'auto'; second.load(); }
+    };
+    first.addEventListener('playing', preloadSecond, { once: true });
 
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     let isScrolled = false;
+    let switchId = 0;       // a newer scroll cancels an older switch still waiting for its video
     let pauseTimer: ReturnType<typeof setTimeout> | undefined;
 
     const play = (v: HTMLVideoElement) => { v.play().catch(() => {}); };
-    const updatePlayback = () => {
-      first.pause();
+    // Fade to the second video only once it is really playing; until then the first stays on
+    // screen, so a slow connection never leaves a blank opening.
+    const showSecond = () => {
+      const id = ++switchId;
+      const shown = () => {
+        if (id !== switchId || !isScrolled) return;
+        setScrolled(true);
+        clearTimeout(pauseTimer);
+        pauseTimer = setTimeout(() => first.pause(), 700);
+      };
+      if (!second.paused && second.readyState >= 3) { shown(); return; }
+      second.addEventListener('playing', shown, { once: true });
+      second.currentTime = 0;
+      play(second);
+    };
+    const showFirst = () => {
+      switchId++;
+      clearTimeout(pauseTimer);
+      setScrolled(false);
       second.pause();
-      if (!document.hidden && !reduced.matches) play(isScrolled ? second : first);
+      play(first);
+    };
+    const updatePlayback = () => {
+      if (document.hidden || reduced.matches) { first.pause(); second.pause(); return; }
+      play(first);
+      if (isScrolled) showSecond();
     };
     const onScroll = () => {
       bar?.classList.toggle('scrolled', hero.getBoundingClientRect().bottom < 100);
       const next = window.scrollY > 0;
       if (next === isScrolled || reduced.matches) return;
       isScrolled = next;
-      setScrolled(next);
-      clearTimeout(pauseTimer);
-      if (next) {
-        second.currentTime = 0;
-        play(second);
-        pauseTimer = setTimeout(() => first.pause(), 700);
-      } else {
-        second.pause();
-        play(first);
-      }
+      if (next) showSecond(); else showFirst();
     };
 
     updatePlayback();
@@ -85,8 +110,11 @@ export default function LeadHero() {
     document.addEventListener('visibilitychange', updatePlayback);
     reduced.addEventListener('change', updatePlayback);
     return () => {
+      switchId++;
       clearTimeout(pauseTimer);
-      first.removeEventListener('playing', onFirstPlaying);
+      first.removeEventListener('playing', onPlaying);
+      second.removeEventListener('playing', onPlaying);
+      first.removeEventListener('playing', preloadSecond);
       introImage.removeEventListener('load', reveal);
       window.removeEventListener('scroll', onScroll);
       document.removeEventListener('visibilitychange', updatePlayback);
@@ -100,7 +128,7 @@ export default function LeadHero() {
   return (
     <section className="landing-hero" ref={heroRef}>
       <div className="landing-sticky">
-        <video ref={secondRef} className="landing-video" src={SECOND_VIDEO} muted playsInline preload="metadata" aria-hidden="true" />
+        <video ref={secondRef} className="landing-video" src={SECOND_VIDEO} muted playsInline loop preload="metadata" aria-hidden="true" />
         <video
           ref={firstRef}
           className={'landing-video landing-video-first' + (scrolled ? ' is-scrolled' : '')}

@@ -1,5 +1,9 @@
+import { refreshCompanyMembership } from '@/lib/company-payment';
 import { NextResponse } from 'next/server';
-import { createBid, listBidsByOrder, getOrder, getUser, listTasks, createTask } from '@i-renovation/shared';
+import { createBid, listBidsByOrder, getOrder, getUser, getResult, listTasks, createTask, ensureCurrentLeadPeriod } from '@i-renovation/shared';
+import { canReceiveLead } from '@i-renovation/shared/membership';
+import { calculateContractorCommission, wanToCny } from '@i-renovation/shared/commission';
+import { evaluateBidRisk } from '@i-renovation/shared/fair-bidding';
 import { companyCanSeeOrder, forbidden, isOrderParty, requireSession } from '@/lib/auth';
 
 export async function POST(req: Request) {
@@ -7,12 +11,13 @@ export async function POST(req: Request) {
     const s = await requireSession(req, ['company']); if (s instanceof NextResponse) return s;
     const body = (await req.json()) as {
       orderId?: number; companyName?: string;
-      amount?: string | number; weeks?: string | number; note?: string;
+      amount?: string | number; weeks?: string | number; note?: string; estimatedCost?: string | number;
     };
 
     const orderId = Number(body.orderId);
     // 投标公司 = 登录的公司账号；公司名取账号资料，不信页面传来的
     const companyId = s.uid;
+    try { await refreshCompanyMembership(s.uid); } catch { return NextResponse.json({ error: '支付宝权益暂无法确认，请稍后重试' }, { status: 503 }); }
     const me = await getUser(s.uid);
     const companyName = (me?.companyName ?? me?.name ?? '').trim();
     const amount = body.amount !== undefined && body.amount !== null ? String(body.amount).trim() : '';
@@ -20,14 +25,34 @@ export async function POST(req: Request) {
 
     if (!Number.isFinite(orderId)) return NextResponse.json({ error: '缺少有效的 orderId' }, { status: 400 });
     if (!companyName) return NextResponse.json({ error: '缺少公司名称' }, { status: 400 });
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !Number.isFinite(Number(weeks)) || Number(weeks) <= 0 || (body.estimatedCost !== undefined && (!Number.isFinite(Number(body.estimatedCost)) || Number(body.estimatedCost) < 0))) return NextResponse.json({ error: '报价、工期和成本必须是有效数字' }, { status: 400 });
+    if (me?.verified !== 1) return NextResponse.json({ error: '请先完成资质审核' }, { status: 403 });
     if (!amount) return NextResponse.json({ error: '缺少报价金额' }, { status: 400 });
     if (!weeks) return NextResponse.json({ error: '缺少工期' }, { status: 400 });
+    if (me?.membershipStatus !== 'active') {
+      return NextResponse.json({ error: '请先开通入驻会员并完成入驻费支付' }, { status: 402 });
+    }
+    const leadPeriod = await ensureCurrentLeadPeriod(companyId);
+    if (!canReceiveLead({ membershipStatus: me.membershipStatus, membershipExpiresAt: me.membershipExpiresAt, monthlyLeadQuota: me.monthlyLeadQuota, monthlyLeadsUsed: leadPeriod?.monthlyLeadsUsed ?? 0 })) {
+      return NextResponse.json({ error: '本月客户资源已用完，请升级套餐或等待下月重置' }, { status: 402 });
+    }
 
     // 只能给公开招标中的订单投标
     const target = await getOrder(orderId);
     if (!target) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
     if (target.status !== 'open') return NextResponse.json({ error: '该订单已不接受投标' }, { status: 409 });
+    const existingBids = await listBidsByOrder(orderId);
+    if (existingBids.some(b => b.companyId === companyId)) {
+      return NextResponse.json({ error: '同一装修队每个项目只能提交一份有效报价，请联系平台修改原报价' }, { status: 409 });
+    }
 
+    const commission = calculateContractorCommission({ amount, estimatedCost: body.estimatedCost, amountInWan: true });
+    const quote = await getResult(target.projectId, 'quote');
+    const platformQuoteCny = Number((quote?.content as { total?: number } | undefined)?.total ?? 0);
+    const risk = evaluateBidRisk(wanToCny(amount), platformQuoteCny, commission.estimatedCostCny);
+    if (!risk.acceptable) {
+      return NextResponse.json({ error: risk.reason, risk, recommendedMinCny: risk.recommendedMinCny, recommendedMaxCny: risk.recommendedMaxCny }, { status: 422 });
+    }
     const bid = await createBid({
       orderId,
       companyId,
@@ -35,6 +60,14 @@ export async function POST(req: Request) {
       amount,
       weeks,
       note: body.note?.trim() || undefined,
+      estimatedCostCny: commission.estimatedCostCny,
+      profitCny: commission.profitCny,
+      platformCommissionCny: commission.platformCommissionCny,
+      netProfitCny: commission.contractorNetProfitCny,
+      commissionBasis: commission.basis,
+      bidRiskLevel: risk.level,
+      bidRiskScore: risk.score,
+      bidRiskReason: risk.reason,
     });
 
     // —— 装修公司发布数据（投标）到达 → 触发匹配智能体（等真实投标数据后才匹配） ——

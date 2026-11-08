@@ -7,7 +7,8 @@ const WRONG = '手机号或密码错误';
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as { phone?: string; password?: string };
-    const phone = (body.phone ?? '').trim();
+    if (typeof body.phone !== 'string' || typeof body.password !== 'string' || body.phone.length > 24 || body.password.length > 128) return NextResponse.json({ error: '登录参数无效' }, { status: 400 });
+    const phone = body.phone.trim();
     const password = body.password ?? '';
     if (!phone) return NextResponse.json({ error: '请填写手机号' }, { status: 400 });
     if (!password) return NextResponse.json({ error: '请填写密码' }, { status: 400 });
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
     const user = await getUserByPhone(phone);
     // 旧版本创建的账号没有密码：告诉用户怎么办，而不是只说「密码错误」
     if (user && !user.passwordHash) {
-      return NextResponse.json({ error: '这个账号是旧版本创建的，还没有设置密码。请点「注册」，用同一手机号和同一身份设置一个密码。' }, { status: 401 });
+      return NextResponse.json({ error: '这个账号是旧版本创建的，还没有设置密码。请联系平台核验身份后恢复账号。' }, { status: 401 });
     }
     const check = checkPassword(password, user?.passwordHash);
     if (!user || !check.ok) return NextResponse.json({ error: WRONG }, { status: 401 });

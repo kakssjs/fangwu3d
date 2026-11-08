@@ -1,18 +1,34 @@
 import { NextResponse } from 'next/server';
+import { decideTask } from '@i-renovation/shared';
 import {
-  getDb, projects, tasks, results, listAllProjects, listAllTasks, listAllOrders, listCompanies, EXCEPTION_RULES,
+  getDb, projects, tasks, results, commissionSettlements, listAllProjects, listAllTasks, listAllOrders, listCompanies, listMembershipPayments, EXCEPTION_RULES,
 } from '@i-renovation/shared';
 import { requireSession } from '@/lib/auth';
+
+export async function POST(req: Request) {
+  const s = await requireSession(req, ['boss']);
+  if (s instanceof NextResponse) return s;
+  try {
+    const body = await req.json();
+    if (!Number.isSafeInteger(body.taskId) || !['retry', 'dismiss'].includes(body.action)) return NextResponse.json({ error: '裁决参数无效' }, { status: 400 });
+    return NextResponse.json(await decideTask(body.taskId, body.action));
+  } catch {
+    return NextResponse.json({ error: '任务裁决失败，请刷新后重试' }, { status: 409 });
+  }
+}
 
 // 老板控制台数据聚合：任务记录 + 成本看板 + 审批队列 + 订单（第一单）
 export async function GET(req: Request) {
   try {
     const s = await requireSession(req, ['boss']); if (s instanceof NextResponse) return s;
-    const [projectRows, taskRows, orderRows, companies] = await Promise.all([
-      listAllProjects(), listAllTasks(), listAllOrders(), listCompanies(),
+    const [projectRows, taskRows, orderRows, companies, membershipPayments] = await Promise.all([
+      listAllProjects(), listAllTasks(), listAllOrders(), listCompanies(), listMembershipPayments(),
     ]);
     const db = await getDb();
-    const resultRows = await db.select().from(results);
+    const [resultRows, commissionRows] = await Promise.all([
+      db.select().from(results),
+      db.select().from(commissionSettlements),
+    ]);
 
     const nameOf = new Map(projectRows.map(p => [p.id, p.name]));
 
@@ -117,6 +133,8 @@ export async function GET(req: Request) {
         matchScore: o.matchScore, createdAt: o.createdAt, contractedAt: o.contractedAt,
       })),
       approvals,
+      membershipPayments,
+      commissionSettlements: commissionRows,
     });
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 500 });

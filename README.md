@@ -15,10 +15,27 @@ packages/shared 共享类型：交接协议、异常规则、Agent 图、红线�
 
 ```bash
 npm install
-cp .env.example .env.local        # 填入 MiMo API key、Redis/数据库地址
+cp .env.example apps/web/.env.local  # 填入服务端密钥、SESSION_SECRET 与老板账号
 npm run dev                       # Next.js  → http://localhost:3000
-npm run dev:worker                # Agent Worker（需本地 Redis）
 ```
+
+需要 Node.js 24。当前线上仅运行 `apps/web`，它包含 API、PGlite 数据库和串行 Agent Runner。`apps/worker` 是尚未接入线上流程的独立骨架，不要与内嵌 Runner 同时当作生产任务执行器。当前部署无需 Redis、外置 PostgreSQL 或 OSS。
+
+个人业主免费；企业只开放一人付基础会员 39 元/月。收到付款返回后查询服务端权益，生成购买入口本身不代表付款成功，不自动续费。其他套餐暂不开放。
+
+生产启动与检查：
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+NODE_ENV=production npm run start -w apps/web -- -H 127.0.0.1 -p 3200
+```
+
+线上由 systemd 管理，前端需要 HTTPS 才能使用安全登录 Cookie。`IRENO_PGLITE_DIR` 和 `IRENO_UPLOAD_DIR` 应指向绝对路径并备份；不要在多个服务进程中打开同一个 PGlite 目录。MiMo 负责识别，Agnes 负责图像，支付凭证只给服务端读取。邮箱未启用时手机号密码登录仍可使用。
+
+`npm test` 使用临时数据库并在结束后清理。`scripts/acceptance.mjs`、`scripts/media-acceptance.mjs` 和 `scripts/browser-acceptance.cjs` 是本次隔离验收工具，不能直接对生产数据运行。正向企业会员测试的模拟权益仅由验收服务预加载 `scripts/test-payments.cjs`；生产服务禁止加载它。
 
 ## 已实现
 
@@ -43,4 +60,6 @@ npm run dev:worker                # Agent Worker（需本地 Redis）
 
 - [ ] 生产切换阿里云 RDS（现为 PGlite，切换只改 `db.ts` 一行）
 - [ ] OSS 上传（MiMo 视觉识别已接入户型识别链路，QA 质检已实现）
-- [ ] 3D 家具摆放与漫游导览（参考 Pascal Editor MCP / 3d-virtual-tour）
+- [x] 装修队入驻费、规模分级、会员套餐和客户资源匹配（详见 `MEMBERSHIP.md`）`r`n- [x] 家具与智能家居商城：小米官方产品目录、分类搜索、选购清单与官方购买入口（详见 `MARKETPLACE.md`）`r`n- [x] 3D 模型模块：户型同源重建、自动家具摆放、门窗/玻璃、材质库、自动漫游、GLB/Blender Cycles/Pascal Editor 导出（详见 `3D-MODULE.md`）
+
+
