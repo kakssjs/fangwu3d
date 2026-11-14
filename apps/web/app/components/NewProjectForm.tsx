@@ -1,6 +1,7 @@
 'use client';
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import LocationPicker from './LocationPicker';
 
 export default function NewProjectForm() {
   const router = useRouter();
@@ -14,7 +15,10 @@ export default function NewProjectForm() {
     setBusy(true);
     setError('');
     const fd = new FormData(e.currentTarget);
-    requestKey.current ||= crypto.randomUUID();
+    // 旧版 Safari、部分安卓 WebView 和微信内置浏览器没有 crypto.randomUUID，退回 getRandomValues
+    requestKey.current ||= typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
     fd.set('requestKey', requestKey.current);
     try {
       const u = JSON.parse(localStorage.getItem('user') ?? '{}');
@@ -78,6 +82,7 @@ export default function NewProjectForm() {
           <input name="area" placeholder="89" className="form-input" />
         </div>
       </div>
+      <LocationPicker />
       <div className="form-group">
         <label>预算（万元）</label>
         <input name="budget" placeholder="15-20" className="form-input" />

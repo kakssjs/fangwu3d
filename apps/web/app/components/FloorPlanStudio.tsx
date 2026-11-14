@@ -134,8 +134,17 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    ctx.fillStyle = '#fdfcf9';
+    ctx.fillStyle = '#fafaf8';
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    // 蓝图网格：淡而克制，仅作制图参照
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(51, 78, 93, 0.055)';
+    ctx.beginPath();
+    for (let gx = 41; gx < CANVAS_W; gx += 41) { ctx.moveTo(gx + 0.5, 0); ctx.lineTo(gx + 0.5, CANVAS_H); }
+    for (let gy = 40; gy < CANVAS_H; gy += 40) { ctx.moveTo(0, gy + 0.5); ctx.lineTo(CANVAS_W, gy + 0.5); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(51, 78, 93, 0.12)';
+    ctx.strokeRect(0.5, 0.5, CANVAS_W - 1, CANVAS_H - 1);
 
     if (bgImgRef.current) {
       ctx.globalAlpha = 0.55;
@@ -147,7 +156,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     }
 
     // 自由画笔（手绘草图线条）
-    ctx.strokeStyle = '#3a2e25';
+    ctx.strokeStyle = '#252a2e';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -161,22 +170,22 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
 
     // 房间矩形 + 标签 + 角点手柄
     for (const r of rects) {
-      ctx.fillStyle = 'rgba(60, 88, 75, 0.12)';
-      ctx.strokeStyle = '#3c584b';
+      ctx.fillStyle = 'rgba(51, 78, 93, 0.10)';
+      ctx.strokeStyle = '#334e5d';
       ctx.lineWidth = 2.5;
       ctx.fillRect(r.x, r.y, r.w, r.d);
       ctx.strokeRect(r.x, r.y, r.w, r.d);
       const cx = r.x + r.w / 2, cy = r.y + r.d / 2;
-      ctx.fillStyle = '#282d29';
+      ctx.fillStyle = '#252a2e';
       ctx.font = 'bold 15px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(r.name, cx, cy - 3);
       ctx.font = '11px sans-serif';
-      ctx.fillStyle = '#6d746e';
+      ctx.fillStyle = '#8d7f78';
       const mw = (r.w * M_PER_PX).toFixed(1), md = (r.d * M_PER_PX).toFixed(1);
       ctx.fillText(`${mw}×${md}m`, cx, cy + 14);
       // 四角手柄（可拖拽改大小）
-      ctx.fillStyle = '#3c584b';
+      ctx.fillStyle = '#334e5d';
       for (const [hx, hy] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.d], [r.x + r.w, r.y + r.d]]) {
         ctx.fillRect(hx - 4, hy - 4, 8, 8);
       }
@@ -188,11 +197,11 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
       (r.openings ?? []).forEach((h, i) => {
         const seg = openingSegment(r, h);
         if (activeOpening && activeOpening.id === r.id && activeOpening.idx === i) {
-          ctx.strokeStyle = '#d6336c';
+          ctx.strokeStyle = '#b0564c';
           ctx.lineWidth = 12;
           ctx.beginPath(); ctx.moveTo(seg.x1, seg.y1); ctx.lineTo(seg.x2, seg.y2); ctx.stroke();
         }
-        ctx.strokeStyle = h.type === 'window' ? '#2f6fd0' : '#c8762f';
+        ctx.strokeStyle = h.type === 'window' ? '#4a7fa5' : '#b07b46';
         ctx.lineWidth = 7;
         ctx.beginPath(); ctx.moveTo(seg.x1, seg.y1); ctx.lineTo(seg.x2, seg.y2); ctx.stroke();
       });
@@ -260,7 +269,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     if (d.mode === 'pen') {
       d.pts.push([x, y]);
       redraw();
-      ctx.strokeStyle = '#3a2e25';
+      ctx.strokeStyle = '#252a2e';
       ctx.lineWidth = 3;
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -269,7 +278,7 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
       ctx.stroke();
     } else if (d.mode === 'draw-rect') {
       redraw();
-      ctx.strokeStyle = '#3c584b';
+      ctx.strokeStyle = '#334e5d';
       ctx.lineWidth = 2.5;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(d.startX, d.startY, x - d.startX, y - d.startY);
@@ -453,38 +462,55 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
 
   return (
     <div>
-      {/* 工具条 */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => fileRef.current?.click()}>
-          ⬆ 上传户型图
+      {/* 工具条：安静的建筑制图工具栏 */}
+      <div className="studio-toolbar">
+        <button type="button" className="studio-btn" onClick={() => fileRef.current?.click()}>
+          ↑ 上传户型图
         </button>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = ''; }} />
-        <span style={{ width: 1, height: 22, background: 'var(--border-strong)' }} />
-        <button className={tool === 'rect' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '5px 12px' }}
-          onClick={() => setTool('rect')}>▭ 框房间（可拖动/调角）</button>
-        <button className={tool === 'pen' ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '5px 12px' }}
-          onClick={() => setTool('pen')}>✏ 手绘</button>
-        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }}
-          onClick={() => { setStrokes(s => s.slice(0, -1)); setRects(r => r.slice(0, -1)); }}>↩ 撤销</button>
-        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }}
-          onClick={() => { setStrokes([]); setRects([]); setBgImage(null); setStdImage(null); }}>✕ 清空</button>
+        <span className="studio-divider" />
+        <div className="studio-segment" role="group" aria-label="绘图工具">
+          <button type="button" className={tool === 'rect' ? 'studio-seg active' : 'studio-seg'}
+            aria-pressed={tool === 'rect'} onClick={() => setTool('rect')}>框选房间</button>
+          <button type="button" className={tool === 'pen' ? 'studio-seg active' : 'studio-seg'}
+            aria-pressed={tool === 'pen'} onClick={() => setTool('pen')}>手绘草图</button>
+        </div>
+        <span className="studio-divider" />
+        <button type="button" className="studio-btn"
+          onClick={() => { setStrokes(s => s.slice(0, -1)); setRects(r => r.slice(0, -1)); }}>撤销</button>
+        <button type="button" className="studio-btn"
+          onClick={() => { setStrokes([]); setRects([]); setBgImage(null); setStdImage(null); }}>清空</button>
+        <span className="studio-hint">
+          {tool === 'rect' ? '拖拽框选房间，可整体移动或拖动四角调整' : '按住鼠标沿墙绘制草图线条'}
+        </span>
       </div>
 
-      {/* 画布 */}
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        style={{
-          width: '100%', maxWidth: CANVAS_W, borderRadius: 12, display: 'block',
-          border: '1px solid var(--border-strong)', cursor: 'crosshair',
-          touchAction: 'none', background: '#fdfcf9',
-        }}
-      />
+      {/* 画布：蓝图网格 + 空状态引导 */}
+      <div className="studio-canvas-wrap" style={{ maxWidth: CANVAS_W }}>
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          className="studio-canvas"
+          style={{ cursor: 'crosshair', touchAction: 'none' }}
+        />
+        {!bgImage && rects.length === 0 && strokes.length === 0 && (
+          <div className="studio-empty">
+            <svg width="76" height="76" viewBox="0 0 76 76" fill="none" aria-hidden="true">
+              <rect x="8.5" y="13.5" width="59" height="49" rx="2.5" stroke="#c7cfd3" strokeWidth="1" />
+              <path d="M8.5 34.5h26v28M34.5 13.5v21M34.5 34.5h33" stroke="#c7cfd3" strokeWidth="1" />
+              <circle cx="34.5" cy="34.5" r="2.8" fill="#8d7f78" />
+              <path d="M19 23h7M50 49h9" stroke="#8d7f78" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+            <h4>上传户型图，或直接框选房间</h4>
+            <p>支持 JPG / PNG 原始户型图，识别后可微调房间与门窗；<br />也可以在画布上按住拖拽，手动框出每个空间。</p>
+          </div>
+        )}
+      </div>
 
       {/* 房间清单：可编辑名字与大小 */}
       {rects.length > 0 && (
@@ -612,3 +638,4 @@ export default function FloorPlanStudio({ projectId, totalArea, initial, onApply
     </div>
   );
 }
+

@@ -43,7 +43,19 @@ export async function POST(req: Request) {
     fs.writeFileSync(floorPlanPath, bytes);
   }
 
-  const project = await createProject({ name, style, budget, area, needs, floorPlanPath, homeownerId, requestKey: requestKey || undefined });
+  // 房屋位置（可选）：文本截断长度，经纬度只接受中国范围内的数字
+  const text = (key: string, max: number) => String(form.get(key) ?? '').trim().slice(0, max) || undefined;
+  const coord = (key: string, min: number, max: number) => {
+    const v = Number(form.get(key));
+    return form.get(key) && Number.isFinite(v) && v >= min && v <= max ? v.toFixed(6) : undefined;
+  };
+  const location = {
+    province: text('province', 40), city: text('city', 40), district: text('district', 40),
+    community: text('community', 80), address: text('address', 200),
+    lng: coord('lng', 73, 136), lat: coord('lat', 3, 54),
+  };
+
+  const project = await createProject({ name, style, budget, area, needs, floorPlanPath, homeownerId, requestKey: requestKey || undefined, ...location });
   if (floorPlanPath && project.floorPlanPath !== floorPlanPath) fs.unlinkSync(floorPlanPath);
   return NextResponse.json({ id: project.id });
   } catch {

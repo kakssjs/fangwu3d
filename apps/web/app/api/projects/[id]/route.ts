@@ -10,6 +10,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const project = await getProject(id);
   if (!project) return NextResponse.json({ error: 'not found' }, { status: 404 });
   const [results, tasks] = await Promise.all([listResults(id), listTasks(id)]);
+  // 装修公司只看到省/市/区（脱敏）；小区、详细地址和坐标只给业主本人和老板
+  if (s.role === 'company') {
+    const { community: _c, address: _a, lng: _x, lat: _y, ...visible } = project;
+    return NextResponse.json({ project: visible, results, tasks });
+  }
   return NextResponse.json({ project, results, tasks });
 }
 

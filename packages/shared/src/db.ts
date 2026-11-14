@@ -21,6 +21,14 @@ export const projects = pgTable('projects', {
   needs: text('needs'),
   floorPlanPath: text('floor_plan_path'),
   requestKey: text('request_key'),
+  // 房屋位置：省/市/区来自高德逆地理编码，小区与详细地址由业主选择或填写，经纬度用于详情页地图
+  province: text('province'),
+  city: text('city'),
+  district: text('district'),
+  community: text('community'),
+  address: text('address'),
+  lng: text('lng'),
+  lat: text('lat'),
   stage: integer('stage').notNull().default(1),
   createdAt: text('created_at').notNull(),
 });
@@ -216,6 +224,13 @@ CREATE TABLE IF NOT EXISTS users (
   membership_paid_amount integer DEFAULT 0, membership_started_at text,
   verified integer NOT NULL DEFAULT 0, created_at text NOT NULL
 );
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS province text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS city text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS district text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS community text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS address text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS lng text;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS lat text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS company_scale text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_tier text DEFAULT 'basic';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS membership_status text DEFAULT 'pending_payment';
@@ -308,6 +323,7 @@ const now = () => new Date().toISOString();
 
 export async function createProject(p: {
   name: string; style: string; budget: string; area?: string; needs?: string; floorPlanPath?: string; homeownerId?: number; requestKey?: string;
+  province?: string; city?: string; district?: string; community?: string; address?: string; lng?: string; lat?: string;
 }) {
   const db = await getDb();
   return db.transaction(async tx => {
@@ -862,6 +878,46 @@ export async function deleteProject(id: number) {
     try { fs.unlinkSync(project.floorPlanPath); } catch { /* ignore */ }
   }
   return true;
+}
+
+// ---- 老板注销用户 ----
+/** 老板控制台的用户列表（不含密码哈希），附带业主项目数 */
+export async function listAllUsers() {
+  const db = await getDb();
+  const [rows, projectRows] = await Promise.all([
+    db.select({
+      id: users.id, role: users.role, name: users.name, phone: users.phone, email: users.email,
+      companyName: users.companyName, createdAt: users.createdAt,
+    }).from(users).orderBy(asc(users.id)),
+    db.select({ homeownerId: projects.homeownerId }).from(projects),
+  ]);
+  const count = new Map<number, number>();
+  for (const p of projectRows) if (p.homeownerId != null) count.set(p.homeownerId, (count.get(p.homeownerId) ?? 0) + 1);
+  return rows.map(u => ({ ...u, projectCount: count.get(u.id) ?? 0 }));
+}
+
+/**
+ * 注销用户（仅老板操作）。业主：连同其全部项目（订单、投标、合同、分成记录、户型图）一并删除，与删除项目相同。
+ * 装修公司：删除其投标；若已被选为某订单的施工方，拒绝注销，以免业主的订单与合同失去对方。
+ * 入驻费 / 会员付款记录保留，作为收款凭证。
+ */
+export async function deleteUser(id: number): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'has_orders' }> {
+  const db = await getDb();
+  const user = await getUser(id);
+  if (!user) return { ok: false, reason: 'not_found' };
+  if (user.role === 'company') {
+    const awarded = await db.select({ id: orders.id }).from(orders).where(eq(orders.companyId, id));
+    if (awarded.length > 0) return { ok: false, reason: 'has_orders' };
+    await db.transaction(async tx => {
+      await tx.delete(bids).where(eq(bids.companyId, id));
+      await tx.delete(users).where(eq(users.id, id));
+    });
+    return { ok: true };
+  }
+  const own = await db.select({ id: projects.id }).from(projects).where(eq(projects.homeownerId, id));
+  for (const p of own) await deleteProject(p.id);
+  await db.delete(users).where(eq(users.id, id));
+  return { ok: true };
 }
 
 // ---- 市场参考价 ----

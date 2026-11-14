@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface TaskRecord {
   id: number; projectId: number; projectName: string;
@@ -66,8 +66,32 @@ function levelTag(level: string) {
   return <span className="tag tag-green">低</span>;
 }
 
+type BossUser = { id: number; role: string; name: string; phone: string | null; email: string | null; companyName: string | null; createdAt: string; projectCount: number };
+
 export default function BossConsole() {
-  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders' | 'membership' | 'commissions'>('approvals');
+  const [tab, setTab] = useState<'approvals' | 'tasks' | 'costs' | 'orders' | 'membership' | 'commissions' | 'users'>('approvals');
+  const [userRows, setUserRows] = useState<BossUser[] | null>(null);
+  const [userMsg, setUserMsg] = useState('');
+  const [confirmUser, setConfirmUser] = useState<number | null>(null);
+  const [userBusy, setUserBusy] = useState<number | null>(null);
+
+  const loadUsers = useCallback(async () => {
+    const res = await fetch('/api/boss/users');
+    if (res.ok) setUserRows(await res.json()); else setUserMsg('读取用户列表失败');
+  }, []);
+  useEffect(() => { if (tab === 'users') loadUsers(); }, [tab, loadUsers]);
+
+  async function removeUser(id: number) {
+    setUserBusy(id); setUserMsg('');
+    try {
+      const res = await fetch(`/api/boss/users?id=${id}`, { method: 'DELETE' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setUserMsg(body.error ?? '注销失败，请稍后重试'); return; }
+      setUserMsg('已注销该用户');
+      setConfirmUser(null);
+      await loadUsers();
+    } finally { setUserBusy(null); }
+  }
   const [membershipBusy, setMembershipBusy] = useState<number | null>(null);
   const [data, setData] = useState<BossData | null>(null);
   const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
@@ -143,16 +167,16 @@ export default function BossConsole() {
   return (
     <main className="container" style={{ paddingTop: 32 }}>
       <div className="section-label" style={{ marginTop: 0 }}>
-        <h2>老板控制台 · 决策中心</h2>
+        <h2>经营与交付中心</h2>
         <div className="line" />
         <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-          BOSS CONSOLE · LIVE
+          经营概览
         </span>
       </div>
 
       <div className="stats-row" style={{ marginTop: 20, marginBottom: 20 }}>
         <div className="stat-card">
-          <div className="label">待审批</div>
+          <div className="label">待处理</div>
           <div className="value orange">{data?.approvals.length ?? '-'}</div>
         </div>
         <div className="stat-card">
@@ -160,23 +184,24 @@ export default function BossConsole() {
           <div className="value cyan">{data?.projects.length ?? '-'}</div>
         </div>
         <div className="stat-card">
-          <div className="label">任务 Token</div>
+          <div className="label">模型调用成本</div>
           <div className="value purple">{(costs?.totalTokens ?? 0).toLocaleString()}</div>
         </div>
         <div className="stat-card">
-          <div className="label">图像生成</div>
+          <div className="label">视觉方案</div>
           <div className="value green">{costs?.imageCount ?? '-'}</div>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {([
-          { key: 'approvals', label: '审批队列' },
-          { key: 'tasks', label: '任务记录' },
-          { key: 'costs', label: '成本看板' },
+          { key: 'approvals', label: '待处理事项' },
+          { key: 'tasks', label: '执行进度' },
+          { key: 'costs', label: '成本概览' },
           { key: 'orders', label: '订单（第一单）' },
-          { key: 'membership', label: '入驻费 / 会员' },
-          { key: 'commissions', label: '利润分成' },
+          { key: 'membership', label: '会员与入驻' },
+          { key: 'commissions', label: '商业结算' },
+          { key: 'users', label: '用户管理' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -193,11 +218,11 @@ export default function BossConsole() {
       {tab === 'approvals' && (
         <>
           <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 16 }}>
-            ★ 红线：Agent 不碰钱、不签合同、不认证资质、不承诺安全 —— 以下决策必须由老板人工确认
+            付款、合同、资质认证与安全承诺均由负责人确认，以下事项需要人工处理
           </p>
           {(data?.approvals ?? []).length === 0 && (
             <div className="panel" style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
-              暂无待审批事项 — 所有 Agent 任务正常流转
+              暂无待处理事项
             </div>
           )}
           {(data?.approvals ?? []).map(item => (
@@ -292,7 +317,7 @@ export default function BossConsole() {
           <div className="panel">
             <div className="panel-title">
               <div className="accent-bar" />
-              Token 消耗 · 按 Agent
+              模型调用成本 · 按执行环节
               <small>单位经济核算（方案 §3.3）</small>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
@@ -347,6 +372,52 @@ export default function BossConsole() {
                 ))}
                 {(data?.membershipPayments ?? []).length === 0 && (
                   <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无入驻费支付记录</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ---------- 用户管理 ---------- */}
+      {tab === 'users' && (
+        <>
+          <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 14 }}>
+            注销会永久删除账号：业主的项目、订单、合同与户型图一并删除；装修公司的投标一并删除，已被选为施工方的公司不能注销。入驻费付款记录保留。
+          </p>
+          {userMsg && <p role="status" style={{ fontSize: 13, marginBottom: 12 }}>{userMsg}</p>}
+          <div className="panel">
+            <table className="data-table">
+              <thead><tr><th>ID</th><th>身份</th><th>姓名 / 公司</th><th>手机号</th><th>邮箱</th><th>项目</th><th>注册时间</th><th>操作</th></tr></thead>
+              <tbody>
+                {(userRows ?? []).map(u => (
+                  <tr key={u.id}>
+                    <td>{u.id}</td>
+                    <td>{u.role === 'company' ? '装潢公司' : '个人用户'}</td>
+                    <td>{u.companyName ? `${u.companyName}（${u.name}）` : u.name}</td>
+                    <td>{u.phone ?? '-'}</td>
+                    <td>{u.email ?? '-'}</td>
+                    <td>{u.projectCount}</td>
+                    <td>{u.createdAt.slice(0, 10)}</td>
+                    <td>
+                      {confirmUser === u.id ? (
+                        <span style={{ display: 'inline-flex', gap: 6 }}>
+                          <button className="btn" style={{ color: 'var(--accent-danger)' }} disabled={userBusy === u.id} onClick={() => removeUser(u.id)}>
+                            {userBusy === u.id ? '注销中…' : '确认注销'}
+                          </button>
+                          <button className="btn btn-ghost" disabled={userBusy === u.id} onClick={() => setConfirmUser(null)}>取消</button>
+                        </span>
+                      ) : (
+                        <button className="btn btn-ghost" onClick={() => { setConfirmUser(u.id); setUserMsg(''); }}>注销</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {userRows !== null && userRows.length === 0 && (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>暂无注册用户</td></tr>
+                )}
+                {userRows === null && (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: 20 }}>加载中...</td></tr>
                 )}
               </tbody>
             </table>
@@ -425,7 +496,7 @@ export default function BossConsole() {
       )}
 
       <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 11, marginTop: 24 }}>
-        老板控制台 · 每 3 秒刷新 · 所有任务交接与成本入账可追溯（Task Record）
+        经营数据实时更新 · 所有执行过程、成本与结算记录可追溯
       </p>
     </main>
   );

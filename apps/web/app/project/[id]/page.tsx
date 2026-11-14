@@ -6,21 +6,23 @@ import { buildSceneModel, type SceneModel } from '@i-renovation/shared/scene3d';
 import { describeMaterialPreset, type MaterialPresetId } from '@i-renovation/shared/materials';
 import { getMembershipTier } from '@i-renovation/shared/membership';
 import FloorPlanStudio, { geometryFromStudioRects, type StudioData, type StudioRect } from '../../components/FloorPlanStudio';
-import AgentAvatar from '../../components/AgentAvatar';
+// 数字员工形象统一为衬线字符徽记（.record-mark），不再使用卡通头像
 import PascalBridge from '../../components/PascalBridge';
+import { INTERIOR_IMAGES } from '@/lib/visuals';
 import { agentOf } from '@/lib/agents';
+import ProjectLocation, { type ProjectPlace } from '../../components/ProjectLocation';
 
 const Scene3D = lazy(() => import('../../components/Scene3D'));
 
 const STAGES: { key: string; label: string }[] = [
-  { key: 'floor_plan', label: '户型识别' },
-  { key: 'designer', label: '二维设计' },
-  { key: 'quote', label: '报价工期' },
-  { key: 'qa', label: '质检交付' },
+  { key: 'floor_plan', label: '空间规划' },
+  { key: 'designer', label: '方案设计' },
+  { key: 'quote', label: '预算工期' },
+  { key: 'qa', label: '交付审核' },
 ];
 
 interface ProjectData {
-  project: { id: number; name: string; style: string; area?: string; budget: string; stage: number; needs?: string };
+  project: { id: number; name: string; style: string; area?: string; budget: string; stage: number; needs?: string } & ProjectPlace;
   results: { kind: string; content: Record<string, unknown> }[];
   tasks: {
     id: number; toAgent: string; fromAgent: string; status: string; createdAt: string;
@@ -173,7 +175,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [fpData, setFpData] = useState<StudioData | null>(null);
   const [customGeom, setCustomGeom] = useState<PlanGeometry | null>(null);
   const [fpSource, setFpSource] = useState<'user' | 'agent'>('user');
-  // 工作台数据 → 下游（Agent 施工图 / 房间渲染图）
+  // 工作台数据 → 下游（空间设计图 / 房间渲染图）
   const [studioRects, setStudioRects] = useState<StudioRect[]>([]);
   const [stdUrl, setStdUrl] = useState<string | null>(null);
   const [genRoomsBusy, setGenRoomsBusy] = useState(false);
@@ -211,7 +213,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   // Load decoration images from results
   useEffect(() => {
     if (!data) return;
-    const dec = data.results.find(r => r.kind === 'decorations')?.content as { images?: DecorationImage[] } | undefined;
+    const dec = results.find(r => r.kind === 'decorations')?.content as { images?: DecorationImage[] } | undefined;
     if (dec?.images) {
       setDecorations(dec.images);
       if (dec.images.length > 0 && selectedIdx < 0) setSelectedIdx(0);
@@ -222,11 +224,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     if (!data) return;
     if (!fpData) {
-      const fp = data.results.find(r => r.kind === 'floorplan')?.content as StudioData | undefined;
+      const fp = results.find(r => r.kind === 'floorplan')?.content as StudioData | undefined;
       if (fp && (fp.stdImage || fp.image || fp.rects?.length)) setFpData(fp);
     }
     if (!decision) {
-      const dc = data.results.find(r => r.kind === 'decision')?.content as { finalTotal?: number; adjustPct?: number; confirmedAt?: string } | undefined;
+      const dc = results.find(r => r.kind === 'decision')?.content as { finalTotal?: number; adjustPct?: number; confirmedAt?: string } | undefined;
       if (dc?.confirmedAt) {
         setDecision({ finalTotal: dc.finalTotal ?? 0, adjustPct: dc.adjustPct ?? 0, confirmedAt: dc.confirmedAt });
         if (typeof dc.adjustPct === 'number') setAdjustPct(dc.adjustPct);
@@ -345,7 +347,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       body: JSON.stringify({
         kind: 'decorations',
         upsert: true,
-        content: { images: imgs, style: data?.project.style, note: `根据房型图生成的各房间渲染图（${imgs.length} 间，AI 生成）` },
+        content: { images: imgs, style: data?.project.style, note: `根据房型图生成的空间效果图（${imgs.length} 间）` },
       }),
     });
     if (!saved.ok) throw new Error('效果图保存失败，请重试');
@@ -449,16 +451,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     return (
       <div className="container" style={{ padding: 80, textAlign: 'center', color: 'var(--text-dim)' }}>
         <div style={{ fontSize: 32, marginBottom: 12, animation: 'ring-pulse 1.5s ease-in-out infinite' }}>⟳</div>
-        <div style={{ fontSize: 15, marginBottom: 8 }}>正在启动智能体流水线…</div>
+        <div style={{ fontSize: 15, marginBottom: 8 }}>正在准备设计方案…</div>
         <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>INITIALIZING AGENTS...</div>
       </div>
     );
   }
 
-  const done = new Set(data.tasks.filter(t => t.status === 'done').map(t => t.toAgent));
-  const running = new Set(data.tasks.filter(t => t.status === 'running').map(t => t.toAgent));
-  const failed = new Set(data.tasks.filter(t => t.status === 'failed').map(t => t.toAgent));
-  const byKind = (k: string) => data.results.find(r => r.kind === k)?.content as Record<string, unknown> | undefined;
+  const tasks = data.tasks ?? [];
+  const results = data.results ?? [];
+  const done = new Set(tasks.filter(t => t.status === 'done').map(t => t.toAgent));
+  const running = new Set(tasks.filter(t => t.status === 'running').map(t => t.toAgent));
+  const failed = new Set(tasks.filter(t => t.status === 'failed').map(t => t.toAgent));
+  const byKind = (k: string) => results.find(r => r.kind === k)?.content as Record<string, unknown> | undefined;
 
   const plan = byKind('plan') as { rooms?: PlanRoom[]; geometry?: PlanGeometry; note?: string; warnings?: string[] } | undefined;
   const savedSceneModel = byKind('scene_model') as SceneModel | undefined;
@@ -476,9 +480,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     : savedSceneModel;
   const materialPrompt = activeSceneModel ? describeMaterialPreset(activeSceneModel.materialPreset) : '';
 
+  const budgetText = (() => {
+    const b = (data.project.budget ?? '').trim();
+    if (!b) return '待确认';
+    const m = b.match(/^(\d+(?:\.\d+)?)\s*[-~—–]\s*(\d+(?:\.\d+)?)\s*(万|w|W)?$/);
+    return m ? `${m[1]}–${m[2]} 万元` : b;
+  })();
+
   // 异常横幅（EXCEPTION_RULES）：等待用户补充 / 升级老板裁决 / 降级交付
-  const waitingTasks = data.tasks.filter(t => t.status === 'waiting_user');
-  const escalatedTasks = data.tasks.filter(t => t.status === 'escalated');
+  const waitingTasks = tasks.filter(t => t.status === 'waiting_user');
+  const escalatedTasks = tasks.filter(t => t.status === 'escalated');
 
   const recommended = match?.contractors?.[0];
   const matchedBid = order && order.companyId !== null
@@ -486,7 +497,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     : null;
 
   // —— 发布/匹配阶段状态流：业主确认 → 发布 → 等待装修公司投标 → 匹配智能体匹配 ——
-  const matcherTask = [...data.tasks].filter(t => t.toAgent === 'matcher').sort((a, b) => b.id - a.id)[0];
+  const matcherTask = [...tasks].filter(t => t.toAgent === 'matcher').sort((a, b) => b.id - a.id)[0];
   const matcherBusy = !!matcherTask && (matcherTask.status === 'pending' || matcherTask.status === 'running');
   const matchCount = match?.contractors?.length ?? 0;
 
@@ -598,37 +609,48 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   return (
     <main className="container" style={{ paddingTop: 32 }}>
-      {/* 项目头部 */}
-      <div className="section-label" style={{ marginTop: 0 }}>
-        <h2>{data.project.name}</h2>
-        <div className="line" />
-        <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-          PRJ_{id} &nbsp;·&nbsp; {data.project.style} &nbsp;·&nbsp; STAGE {data.project.stage >= 3 ? 'PUBLISH / MATCH' : 'DESIGNING'}
-        </span>
-        {delConfirm ? (
-          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <button
-              className="btn"
-              disabled={delBusy}
-              onClick={() => void deleteProject()}
-              style={{ fontSize: 11, padding: '3px 10px', background: 'var(--bad-bg)', border: '1px solid #f1c4bf', color: 'var(--accent-danger)' }}
-            >
-              {delBusy ? '删除中…' : '确认删除？'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => setDelConfirm(false)} style={{ fontSize: 11, padding: '3px 10px' }}>
-              取消
-            </button>
-          </span>
-        ) : (
-          <button
-            className="btn btn-ghost"
-            onClick={() => setDelConfirm(true)}
-            style={{ fontSize: 11, padding: '3px 10px', color: 'var(--text-dim)' }}
-          >
-            🗑 删除项目
-          </button>
-        )}
-      </div>
+      {/* 项目视觉头部 */}
+      <section
+        className="project-masthead"
+        style={{ backgroundImage: `url("${INTERIOR_IMAGES.living}")` }}
+      >
+        <div className="project-masthead-content">
+          <div>
+            <span className="role-kicker"><i /> RESIDENCE PROJECT · {data.project.style}</span>
+            <h1>{data.project.name}</h1>
+            <div className="project-masthead-meta">
+              <span>{data.project.area ? `${data.project.area}㎡` : '面积待量房'}</span>
+              <span>{data.project.budget ? `预算 ${data.project.budget}` : '预算待确认'}</span>
+              <span>{data.project.stage >= 3 ? '施工匹配中' : '方案设计中'}</span>
+            </div>
+          </div>
+          <div className="project-masthead-actions">
+            {delConfirm ? (
+              <>
+                <button
+                  className="btn"
+                  disabled={delBusy}
+                  onClick={() => void deleteProject()}
+                  style={{ fontSize: 11, padding: '7px 12px', background: 'var(--bad-bg)', border: '1px solid #f1c4bf', color: 'var(--accent-danger)' }}
+                >
+                  {delBusy ? '删除中…' : '确认删除？'}
+                </button>
+                <button className="btn btn-ghost role-ghost-light" onClick={() => setDelConfirm(false)} style={{ fontSize: 11, padding: '7px 12px' }}>
+                  取消
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-ghost role-ghost-light"
+                onClick={() => setDelConfirm(true)}
+                style={{ fontSize: 11, padding: '7px 12px' }}
+              >
+                删除项目
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* 异常处理横幅（EXCEPTION_RULES）：反问用户 / 升级老板裁决 */}
       {waitingTasks.map(t => (
@@ -637,7 +659,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           background: 'var(--warn-bg)', border: '1px solid #f0d9a4',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
-          <AgentAvatar agentKey={t.toAgent} size={40} />
+          <div className={`exception-mark ${t.status === 'waiting_user' ? 'warn' : 'danger'}`}>{agentOf(t.toAgent).name.slice(-1)}</div>
           <div style={{ flex: 1, minWidth: 260 }}>
             <b style={{ color: 'var(--accent-warn)', fontSize: 13 }}>⏳ 需要您补充信息 · {agentOf(t.toAgent).name}</b>
             <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 4, lineHeight: 1.7 }}>
@@ -655,7 +677,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           background: 'var(--bad-bg)', border: '1px solid #f1c4bf',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
-          <AgentAvatar agentKey={t.toAgent} size={40} />
+          <div className={`exception-mark ${t.status === 'waiting_user' ? 'warn' : 'danger'}`}>{agentOf(t.toAgent).name.slice(-1)}</div>
           <div style={{ flex: 1, minWidth: 260 }}>
             <b style={{ color: 'var(--accent-danger)', fontSize: 13 }}>🔔 已升级老板裁决 · {String(t.output?.exception?.ruleName ?? '异常升级')}</b>
             <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 4, lineHeight: 1.7 }}>
@@ -666,49 +688,92 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </div>
       ))}
 
-      {/* 流水线进度 */}
-      <div className="pipeline" style={{ marginTop: 24 }}>
-        {STAGES.map((s, i) => (
-          <div key={s.key} className={
-            done.has(s.key) ? 'pipeline-node done' :
-            running.has(s.key) ? 'pipeline-node running' :
-            failed.has(s.key) ? 'pipeline-node failed' : 'pipeline-node'
-          }>
-            <div className="pipeline-icon"><AgentAvatar agentKey={s.key} size={34} /></div>
-            <span>
-              <b style={{ color: 'var(--accent2)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'block' }}>{agentOf(s.key).name} · {agentOf(s.key).role}</b>
-              {s.label}
-            </span>
+      {/* 阶段进度轨：克制的建筑感时间轴，替代卡通数字员工流水线 */}
+      <div className="stage-rail" style={{ marginTop: 24 }}>
+        {STAGES.map((s, i) => {
+          const status = done.has(s.key) ? 'done' : running.has(s.key) ? 'running' : failed.has(s.key) ? 'failed' : 'pending';
+          return (
+            <div key={s.key} className={`stage-step ${status}`}>
+              <div className="stage-marker">{status === 'done' ? '✓' : i + 1}</div>
+              <span className="stage-name">{s.label}</span>
+              <span className="stage-note">
+                {status === 'done' ? '已完成' : status === 'running' ? '进行中' : status === 'failed' ? '需处理' : '待开始'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 项目概要：单块面板 + 细分隔线元数据，替代四张大圆角统计卡 */}
+      <section className="project-brief">
+        <div className="brief-top">
+          <div>
+            <div className="brief-eyebrow">PROJECT BRIEF · 项目概要</div>
+            <h2 className="brief-heading">
+              {data.project.area ? `${data.project.area}㎡` : ''}{data.project.style}住宅
+              <em>，{progress >= 100 ? '设计流程已全部完成' : `设计流程进行至 ${progress}%`}</em>
+            </h2>
           </div>
-        ))}
-      </div>
+          <div className="brief-progress">
+            <div className="brief-progress-label">
+              <span>DESIGN FLOW · 设计流程</span>
+              <b>{doneCount} / {STAGES.length}</b>
+            </div>
+            <div className="brief-bar"><i style={{ width: `${progress}%` }} /></div>
+          </div>
+        </div>
+        <div className="brief-meta">
+          <div className="brief-item"><span>建筑面积</span><strong>{data.project.area ? `${data.project.area} ㎡` : '待量房'}</strong></div>
+          <div className="brief-item"><span>预算区间</span><strong>{budgetText}</strong></div>
+          <div className="brief-item"><span>设计风格</span><strong>{data.project.style}</strong></div>
+          <div className="brief-item"><span>当前阶段</span><strong>{data.project.stage >= 3 ? '施工匹配' : '方案设计'}</strong></div>
+          <div className="brief-item"><span>空间规划</span><strong>{studioRects.length > 0 ? `${studioRects.length} 个空间` : plan?.rooms?.length ? `${plan.rooms.length} 个空间` : '待规划'}</strong></div>
+        </div>
+      </section>
 
-      {/* 统计卡片 */}
-      <div className="stats-row" style={{ marginTop: 24 }}>
-        <div className="stat-card">
-          <div className="label">Progress</div>
-          <div className="value cyan">{progress}%</div>
+      {/* 设计意向：真实空间影像 + 材质色卡，让页面有呼吸也有分量 */}
+      <section className="moodband">
+        <div className="moodband-head">
+          <div>
+            <div className="brief-eyebrow">DESIGN DIRECTION · 设计意向</div>
+            <h3>轻奢不是堆料，是光、比例与材质的分寸感</h3>
+          </div>
+          <p>以雾蓝灰与暖木色为基调，岩板、胡桃木与黄铜收口；效果图与三维模型都按这套材质语言执行。</p>
         </div>
-        <div className="stat-card">
-          <div className="label">Status</div>
-          <div className="value green">{doneCount}/{STAGES.length}</div>
+        <div className="mood-grid">
+          {[
+            { img: INTERIOR_IMAGES.livingWarm, t: '自然光与安静秩序', s: 'LIVING / 01' },
+            { img: INTERIOR_IMAGES.detail, t: '材质的温度', s: 'DETAIL / 02' },
+            { img: INTERIOR_IMAGES.texture, t: '触感与层次', s: 'TEXTURE / 03' },
+          ].map(x => (
+            <div key={x.s} className="mood-shot" style={{ backgroundImage: `url("${x.img}")` }}>
+              <div className="mood-caption">
+                <b>{x.t}</b>
+                <span>{x.s}</span>
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="stat-card">
-          <div className="label">Budget</div>
-          <div className="value purple">{data.project.budget}</div>
+        <div className="swatch-row">
+          <span>材质意向</span>
+          <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#d9d4cc,#b9b2a8)' }} /><b>微水泥</b></div>
+          <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#7a5a41,#a67c52)' }} /><b>胡桃木</b></div>
+          <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#c9a227,#e8d9a0)' }} /><b>黄铜</b></div>
+          <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#e8e4dd,#cfc7bb)' }} /><b>岩板</b></div>
+          <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#cfc6bb,#a99c8f)' }} /><b>羊绒</b></div>
         </div>
-        <div className="stat-card">
-          <div className="label">Area</div>
-          <div className="value orange">{data.project.area ? `${data.project.area}㎡` : '-'}</div>
-        </div>
-      </div>
+      </section>
 
-      {/* 二维装修图（施工参考）：用户上传 / 画板手绘工作台 */}
+      <section style={{ marginTop: 18 }}>
+        <ProjectLocation place={data.project} />
+      </section>
+
+      {/* 户型与空间规划：用户上传 / 画板手绘工作台 */}
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <div className="accent-bar" />
-          二维装修图（施工参考）
-          <small>上传图片 / 手绘 → 标准房型图 → 3D</small>
+          户型与空间规划
+          <small>上传原始户型图或手动框选 → 标准平面图 → 三维模型</small>
         </div>
         <FloorPlanStudio
           projectId={Number(id)}
@@ -755,23 +820,28 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   <tr key={i}>
                     <td>{r.name}</td>
                     <td>{r.area}㎡</td>
-                    <td>{Math.round((r.area / sum) * 100)}%</td>
+                    <td>
+                    <div className="ratio-cell">
+                      <span>{Math.round((r.area / sum) * 100)}%</span>
+                      <div className="ratio-bar"><i style={{ width: `${Math.round((r.area / sum) * 100)}%` }} /></div>
+                    </div>
+                  </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
           <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
-            AI 识别生成，尺寸以现场量房为准
+            户型识别生成 · 尺寸以现场量房为准
           </p>
         </section>
       )}
 
-      {/* Agent 施工图：标准房型图（上传图 / Agnes 手绘标准化） */}
+      {/* 空间设计图：标准房型图 */}
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <div className="accent-bar" />
-          Agent 施工图
+          空间设计图
           <small>标准房型图 · 与 3D 同源</small>
         </div>
         {(stdUrl || fpData?.stdImage || fpData?.image) ? (
@@ -782,7 +852,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               style={{ width: '100%', maxWidth: 820, borderRadius: 12, border: '1px solid var(--border-strong)', display: 'block' }}
             />
             <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
-              {(stdUrl || fpData?.stdImage) ? 'AI 生成标准房型图 · 尺寸以现场量房为准' : '上传户型图 · 可在上方工作台一键标准化'}
+              {(stdUrl || fpData?.stdImage) ? '标准房型图 · 尺寸以现场量房为准' : '上传户型图 · 可在上方工作台一键标准化'}
             </p>
           </>
         ) : design?.svg ? (
@@ -792,7 +862,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </>
         ) : (
           <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>
-            暂无房型图 — 在上方工作台上传图片或手绘框房间，点「Agnes 生成标准平面图」
+            暂无房型图 — 在上方工作台上传图片或手绘框房间，点击「生成标准平面图」
           </p>
         )}
       </section>
@@ -806,7 +876,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '12px 0 4px' }}>
           <button className="btn btn-primary" disabled={genRoomsBusy} onClick={() => void generateRoomRenderings()}>
-            {genRoomsBusy ? `渲染图生成中 ${genRoomsProgress}…` : '✦ 生成各房间渲染图'}
+            {genRoomsBusy ? `渲染图生成中 ${genRoomsProgress}…` : '生成空间效果图'}
           </button>
           <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
             基于房型图房间（{(studioRects.length ? studioRects.map(r => r.name) : (plan?.rooms ?? []).map(r => r.name)).join('、') || '识别后可用'}）· 共 {(studioRects.length || (plan?.rooms ?? []).length) || 0} 间，有几个生成几张 · {data.project.style} 风格
@@ -815,7 +885,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         {studioRects.length === 0 && (
           <div className="notice notice-warn" style={{ margin: '8px 0 4px', fontSize: 12 }}>
             还没有户型图：下面的房间和门窗是系统按面积估的，不是真实布局，渲染图只是示意，也不会核对。
-            请在上方工作台上传户型图（或框出房间），点「AI 识别房间」，核对门窗后再生成。
+            请在上方工作台上传户型图（或框出房间），点击「识别房间」，核对门窗后再生成。
           </div>
         )}
         {/* 房间选择 */}
@@ -908,9 +978,17 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             {/* 消息列表 */}
             <div style={{ maxHeight: 260, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {chatMessages.length === 0 && (
-                <p style={{ color: 'var(--text-dim)', fontSize: 12, textAlign: 'center', padding: '18px 0' }}>
-                  输入修改意见，AI 将重新生成装饰图。例如："换成蓝色沙发"、"增加绿植"、"改成暖色调灯光"
-                </p>
+                <div style={{ textAlign: 'center', padding: '14px 0 6px' }}>
+                  <p style={{ color: 'var(--text-dim)', fontSize: 12, lineHeight: 1.9 }}>
+                    输入修改意见，重新生成空间效果图；也可以直接点用常用改法。
+                  </p>
+                  <div className="suggest-row">
+                    {['换成蓝色沙发', '增加绿植', '改成暖色调灯光', '换胡桃木家具'].map(s => (
+                      <button key={s} type="button" className="suggest-chip" disabled={chatBusy}
+                        onClick={() => setChatInput(s)}>{s}</button>
+                    ))}
+                  </div>
+                </div>
               )}
               {chatMessages.map((m, i) => (
                 <div key={i} style={{
@@ -929,7 +1007,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
               ))}
               {chatBusy && (
                 <div style={{ alignSelf: 'flex-start', color: 'var(--text-dim)', fontSize: 12, padding: '4px 0' }}>
-                  <span style={{ animation: 'pulse 1s infinite' }}>⟳ AI 正在生成...</span>
+                  <span style={{ animation: 'pulse 1s infinite' }}>⟳ 正在生成...</span>
                 </div>
               )}
             </div>
@@ -961,14 +1039,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <div className="panel-title">
               <div className="accent-bar" />
               3D 设计模型（户型 · 材质 · 家具）
-              <small>{activeSceneModel ? `SCENE MODEL → ${activeSceneModel.materialPreset.name} · GLB / BLENDER / PASCAL` : (useUser ? '来源：用户户型图' : 'PLAN JSON → EXTRUSION')}</small>
+              <small>{activeSceneModel ? `3D 场景 · ${activeSceneModel.materialPreset.name} · 可导出` : (useUser ? '来源：用户户型图' : '户型几何重建')}</small>
             </div>
             {customGeom && plan?.geometry && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <button className={useUser ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '4px 12px' }}
                   onClick={() => setFpSource('user')}>按我的户型图</button>
                 <button className={!useUser ? 'btn btn-primary' : 'btn btn-ghost'} style={{ fontSize: 12, padding: '4px 12px' }}
-                  onClick={() => setFpSource('agent')}>Agent 自动布局</button>
+                  onClick={() => setFpSource('agent')}>自动布局</button>
               </div>
             )}
             <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>Loading 3D...</div>}>
@@ -989,7 +1067,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             />
             {effWarnings.length > 0 && (
               <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: 'var(--warn-bg)', border: '1px solid #f0d9a4', fontSize: 11, color: 'var(--text-dim)' }}>
-                ⚠ ForgeFloor 校验提示：{effWarnings.join('；')}
+                ⚠ 空间校验提示：{effWarnings.join('；')}
               </div>
             )}
           </section>
@@ -1002,6 +1080,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <div className="accent-bar" />
             费用计算 · 材料清单与报价工期
             <small>约 {quote.weeks} 周 · 报价师「小算」</small>
+          </div>
+          <div className="swatch-row" style={{ marginTop: -2, marginBottom: 16 }}>
+            <span>材料意向</span>
+            <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#e8e4dd,#cfc7bb)' }} /><b>岩板</b></div>
+            <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#7a5a41,#a67c52)' }} /><b>胡桃木</b></div>
+            <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#c9a227,#e8d9a0)' }} /><b>黄铜</b></div>
+            <div className="swatch"><i style={{ background: 'linear-gradient(135deg,#d9d4cc,#b9b2a8)' }} /><b>微水泥</b></div>
           </div>
           <table className="data-table">
             <thead>
@@ -1029,39 +1114,50 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </p>
           {quote.note && <p style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 4 }}>{quote.note}</p>}
 
-          {/* 用户调价 + 最终确认（人工动作） */}
-          <div style={{ marginTop: 16, padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-strong)', background: 'var(--accent-soft)' }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
-              <span style={{ color: 'var(--text-dim)' }}>对报价有异议？调整</span>
-              <input
-                type="number" step="1" value={adjustPct}
-                onChange={e => setAdjustPct(Number(e.target.value) || 0)}
-                disabled={!!decision}
-                style={{ width: 72, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-deep)', color: 'var(--text)', outline: 'none' }}
-              />
-              <span style={{ color: 'var(--text-dim)' }}>%　调整后</span>
-              <strong style={{ color: 'var(--accent)', fontSize: 16 }}>
-                ¥{Math.round((quote.total ?? 0) * (1 + adjustPct / 100)).toLocaleString()}
-              </strong>
+          {/* 报价确认：清单合计 → 调整 → 最终确认 */}
+          <div className="review-strip">
+            <div className="review-copy">
+              <div className="brief-eyebrow">FINAL REVIEW · 方案确认</div>
+              <div className="review-figures">
+                <div className="review-fig">
+                  <span>清单合计</span>
+                  <b>¥{(quote.total ?? 0).toLocaleString()}</b>
+                </div>
+                <div className="review-fig">
+                  <span>调整幅度</span>
+                  <div className="review-adjust">
+                    <input
+                      type="number" step="1" value={adjustPct}
+                      onChange={e => setAdjustPct(Number(e.target.value) || 0)}
+                      disabled={!!decision}
+                      aria-label="报价调整百分比"
+                    />
+                    <em>%</em>
+                  </div>
+                </div>
+                <div className="review-fig">
+                  <span>调整后</span>
+                  <b className="accent">¥{Math.round((quote.total ?? 0) * (1 + adjustPct / 100)).toLocaleString()}</b>
+                </div>
+              </div>
             </div>
-            <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="review-action">
               {decision ? (
-                <>
-                  <span className="tag tag-green">✓ 已最终确认</span>
-                  <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                    确认价 ¥{decision.finalTotal.toLocaleString()} · {decision.confirmedAt.slice(0, 10)} · 已自动发布到接单市场
-                  </span>
-                </>
+                <div className="review-confirmed">
+                  <span>✓ 已最终确认</span>
+                  <p>确认价 ¥{decision.finalTotal.toLocaleString()} · {decision.confirmedAt.slice(0, 10)} · 已自动发布到接单市场</p>
+                </div>
               ) : (
                 <>
-                  <button className="btn btn-primary" disabled={confirmBusy} onClick={() => void finalConfirm()}>
+                  <button className="btn btn-primary review-btn" disabled={confirmBusy} onClick={() => void finalConfirm()}>
                     {confirmBusy ? '确认中…' : '✓ 最终确认方案'}
                   </button>
-                  <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
-                    可先在上方对话修改房间效果；确认后将自动发布，无需再手动操作
-                  </span>
+                  <p>可先在上方对话修改房间效果；确认后自动发布到接单市场。</p>
                 </>
               )}
+            </div>
+            <div className="review-trust">
+              平台服务费仅向装修公司收取，业主不向平台付费 · 报价含材料清单与工期，最终以签约量房为准
             </div>
           </div>
         </section>
@@ -1075,7 +1171,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             <small>{match!.matchedBy === 'mimo' ? '第二智能体「小桥」· MiMo 按真实投标匹配' : '匹配师「小桥」按规则评分匹配'} · 脱敏信息</small>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0 4px' }}>
-            <AgentAvatar agentKey="matcher" size={40} />
+            <div className="record-mark lg">桥</div>
             <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
               <b>小桥 · 匹配智能体{match!.matchedBy === 'mimo' ? '（MiMo）' : ''}</b>
               <span style={{ color: 'var(--text-dim)' }}>　{match!.matchedBy === 'mimo'
@@ -1124,42 +1220,49 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </section>
       )}
 
-      {/* 实时智能体活动流 */}
+      {/* 设计执行记录：细线日志，克制的流程档案 */ }
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <div className="accent-bar" />
-          智能体执行日志
-          <small style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', animation: 'pulse 1.5s infinite' }}>● LIVE</small>
+          设计执行记录
+          <small className="record-live"><i /> 实时更新</small>
         </div>
-        <div style={{ margin: '12px 0 18px', height: 6, borderRadius: 3, background: 'var(--accent-soft)', overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, var(--accent), var(--accent3))', width: progress + '%', transition: 'width 0.8s ease', boxShadow: 'none' }} />
+
+        {/* 流程总进度 */}
+        <div className="record-progress">
+          <div className="record-progress-label">
+            <span>PROCESS · 流程进度</span>
+            <b>{doneCount} / {STAGES.length}</b>
+          </div>
+          <div className="brief-bar"><i style={{ width: `${progress}%` }} /></div>
         </div>
-        {/* 任务交接链：真实 fromAgent → toAgent（数字员工协作） */}
-        {data.tasks.length > 0 && (
-          <div style={{ margin: '4px 0 18px', padding: '12px 14px', borderRadius: 12, border: '1px solid #e4d6bd', background: 'var(--accent2-soft)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>🔗 任务交接链 · 数字员工协作</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {[...data.tasks].sort((a, b) => a.id - b.id).map((t, i) => {
+
+        {/* 任务流转链：真实 fromAgent → toAgent */}
+        {tasks.length > 0 && (
+          <div className="flow-strip">
+            <div className="flow-strip-label">任务流转 · TASK HANDOFF</div>
+            <div className="flow-chain">
+              {[...tasks].sort((a, b) => a.id - b.id).map((t, i) => {
                 const from = agentOf(t.fromAgent);
                 const to = agentOf(t.toAgent);
                 return (
                   <Fragment key={t.id}>
                     {i === 0 && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--bg-deep)', border: `1px solid ${from.color}55` }}>
-                        <AgentAvatar agentKey={t.fromAgent} size={28} />
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>{from.name}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{from.role}</span>
+                      <span className="flow-node">
+                        <div className="record-mark">{from.name.slice(-1)}</div>
+                        <span className="flow-node-name">{from.name}</span>
+                        <span className="flow-node-role">{from.role}</span>
                       </span>
                     )}
-                    <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>→</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 20, background: 'var(--bg-deep)', border: `1px solid ${to.color}55` }}>
-                      <AgentAvatar agentKey={t.toAgent} size={28} />
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{to.name}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{to.role}</span>
-                      <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>#{t.id}</span>
-                      {t.status === 'done' && <span style={{ fontSize: 9, color: 'var(--accent3)' }}>✓</span>}
-                      {t.status === 'running' && <span style={{ fontSize: 9, color: 'var(--accent)', animation: 'pulse 1s infinite' }}>●</span>}
-                      {t.status === 'failed' && <span style={{ fontSize: 9, color: 'var(--accent-danger)' }}>✗</span>}
+                    <span className="flow-arrow">→</span>
+                    <span className="flow-node">
+                      <div className="record-mark">{to.name.slice(-1)}</div>
+                      <span className="flow-node-name">{to.name}</span>
+                      <span className="flow-node-role">{to.role}</span>
+                      <span className="flow-node-id">#{t.id}</span>
+                      {t.status === 'done' && <span className="flow-flag done">✓</span>}
+                      {t.status === 'running' && <span className="flow-flag running">●</span>}
+                      {t.status === 'failed' && <span className="flow-flag failed">✕</span>}
                     </span>
                   </Fragment>
                 );
@@ -1167,38 +1270,42 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
         )}
-        {/* 阶段日志：每个数字员工头像 + 名字 */}
-        {STAGES.map((s) => {
-          const a = agentOf(s.key);
-          // 以该智能体最新一次任务为准：重跑后不再显示旧任务的状态
-          const task = data.tasks.filter(t => t.toAgent === s.key).sort((x, y) => y.id - x.id)[0];
-          const status = !task ? 'pending' : task.status === 'done' ? 'done' : task.status === 'running' ? 'running'
-            : task.status === 'failed' ? 'failed' : task.status === 'waiting_user' ? 'waiting' : task.status === 'escalated' ? 'escalated' : 'pending';
-          return (
-            <div key={s.key} className="timeline-item" style={{ opacity: status === 'pending' ? 0.5 : 1 }}>
-              <div className={'timeline-dot ' + (status === 'pending' ? '' : status)} style={status === 'pending' ? { background: 'var(--border-strong)' } : undefined} />
-              <div className="timeline-body" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <AgentAvatar agentKey={s.key} size={38} />
-                <div>
-                  <div className="title">{a.name} <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>· {a.role} · {s.label}</span></div>
-                  <div className="time">
-                    {status === 'done' && <span style={{ color: 'var(--accent3)' }}>&#10003; 已完成</span>}
-                    {status === 'running' && <span style={{ color: 'var(--accent)' }}>&#9679; 执行中...</span>}
-                    {status === 'failed' && <span style={{ color: 'var(--accent-danger)' }}>&#10007; 失败</span>}
-                    {status === 'waiting' && <span style={{ color: 'var(--accent-warn)' }}>⏳ 等待您补充：{String(task?.output?.ask ?? task?.output?.exception?.detail ?? '请补充信息后继续')}</span>}
-                    {status === 'escalated' && <span style={{ color: 'var(--accent-warn)' }}>⚠ 已转平台人工处理</span>}
-                    {status === 'pending' && <span>&#9711; {task ? '排队中' : '等待上一步完成'}</span>}
-                    {task && <span style={{ marginLeft: 8 }}>Task #{task.id}</span>}
+
+        {/* 阶段日志 */}
+        <div className="record-list">
+          {STAGES.map((s, i) => {
+            const a = agentOf(s.key);
+            // 以该智能体最新一次任务为准：重跑后不再显示旧任务的状态
+            const task = data.tasks.filter(t => t.toAgent === s.key).sort((x, y) => y.id - x.id)[0];
+            const status = !task ? 'pending' : task.status === 'done' ? 'done' : task.status === 'running' ? 'running'
+              : task.status === 'failed' ? 'failed' : task.status === 'waiting_user' ? 'waiting' : task.status === 'escalated' ? 'escalated' : 'pending';
+            return (
+              <div key={s.key} className={`record-row ${status}`}>
+                <div className="record-idx">{String(i + 1).padStart(2, '0')}</div>
+                <div className="record-mark lg">{a.name.slice(-1)}</div>
+                <div className="record-main">
+                  <div className="record-title">
+                    {s.label}
+                    <span>　{a.name} · {a.role}</span>
+                  </div>
+                  <div className="record-sub">
+                    {status === 'done' ? '该阶段已完成' : status === 'running' ? '正在执行，请稍候' : status === 'failed' ? '执行失败，等待处理'
+                      : status === 'waiting' ? `等待您补充：${String(task?.output?.ask ?? task?.output?.exception?.detail ?? '请补充信息后继续')}`
+                      : status === 'escalated' ? '已转平台人工处理' : task ? '排队中' : '等待前序阶段完成'}
+                    {task && <em>Task #{task.id}</em>}
                   </div>
                 </div>
+                <div className={`record-status ${status}`}>
+                  {status === 'done' ? '✓ 已完成' : status === 'running' ? '● 执行中' : status === 'failed' ? '✕ 失败' : status === 'waiting' ? '⏳ 待补充' : status === 'escalated' ? '⚠ 人工处理' : '○ 等待中'}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
         {!match && (
-          <div style={{ textAlign: 'center', padding: '18px 0 6px' }}>
-            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1s infinite', marginRight: 8, verticalAlign: 'middle' }} />
-            <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{waitingTasks.length ? '流水线已暂停 — 请按上方提示补充户型信息（上传户型图，或在画板标注房间后点「按此图生成 3D」）' : escalatedTasks.length ? '流水线已暂停 — 等待平台人工处理' : 'Agent 流水线执行中 — 上方日志实时刷新'}</span>
+          <div className="record-foot">
+            <i /> {waitingTasks.length ? '流水线已暂停 — 请按上方提示补充户型信息（上传户型图，或在画板标注房间后点「按此图生成 3D」）' : escalatedTasks.length ? '流水线已暂停 — 等待平台人工处理' : '设计方案生成中 — 这里会实时记录每一步'}
           </div>
         )}
       </section>
@@ -1208,38 +1315,47 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <div className="panel-title">
           <div className="accent-bar" />
           发布 · 竞标 · 匹配
-          <small>MARKETPLACE · 业主确认后发布，装修公司投标后匹配智能体「小桥」自动匹配</small>
+          <small>业主确认后发布，施工方报价后进行综合匹配</small>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '14px 0 6px' }}>
-          {[
-            {
-              label: '① 业主最终确认', ok: !!decision, pending: !decision && !!quote,
-              hint: decision ? `确认价 ¥${decision.finalTotal.toLocaleString()}` : (quote ? '等待你在报价区确认方案' : '等待报价生成'),
-            },
-            {
-              label: '② 发布到接单市场', ok: !!order, pending: !!decision && !order,
-              hint: order ? `ORDER_${order.id} 已发布` : '业主确认后自动发布',
-            },
-            {
-              label: '③ 装修公司发布数据（投标）', ok: bids.length > 0, pending: !!order && bids.length === 0,
-              hint: bids.length > 0 ? `${bids.length} 家已投标` : (order ? '等待装修公司发布投标数据…' : '发布后装修公司可投标'),
-            },
-            {
-              label: '④ 匹配智能体匹配', ok: matchCount > 0, pending: matcherBusy || (bids.length > 0 && matchCount === 0),
-              hint: matchCount > 0 ? `已匹配 ${matchCount} 家` : (matcherBusy ? '小桥匹配中…' : (bids.length > 0 ? '待匹配' : '等待投标数据')),
-            },
-          ].map((s, i) => (
-            <div key={i} style={{
-              flex: '1 1 220px', padding: '12px 14px', borderRadius: 12,
-              border: `1px solid ${s.ok ? '#bfe3d0' : s.pending ? 'var(--border-strong)' : 'var(--border)'}`,
-              background: s.ok ? 'var(--ok-bg)' : s.pending ? 'var(--accent-soft)' : 'var(--bg-deep)',
-            }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: s.ok ? 'var(--accent3)' : s.pending ? 'var(--accent)' : 'var(--text-dim)' }}>
-                {s.ok ? '✓ ' : s.pending ? '● ' : '○ '}{s.label}
+        <div className="match-layout">
+          <div className="match-steps">
+            {[
+              {
+                label: '① 业主最终确认', ok: !!decision, pending: !decision && !!quote,
+                hint: decision ? `确认价 ¥${decision.finalTotal.toLocaleString()}` : (quote ? '等待你在报价区确认方案' : '等待报价生成'),
+              },
+              {
+                label: '② 发布到接单市场', ok: !!order, pending: !!decision && !order,
+                hint: order ? `ORDER_${order.id} 已发布` : '业主确认后自动发布',
+              },
+              {
+                label: '③ 装修公司发布数据（投标）', ok: bids.length > 0, pending: !!order && bids.length === 0,
+                hint: bids.length > 0 ? `${bids.length} 家已投标` : (order ? '等待装修公司发布投标数据…' : '发布后装修公司可投标'),
+              },
+              {
+                label: '④ 综合匹配', ok: matchCount > 0, pending: matcherBusy || (bids.length > 0 && matchCount === 0),
+                hint: matchCount > 0 ? `已匹配 ${matchCount} 家` : (matcherBusy ? '匹配中…' : (bids.length > 0 ? '待匹配' : '等待投标数据')),
+              },
+            ].map((s, i) => (
+              <div key={i} style={{
+                padding: '12px 14px', borderRadius: 12,
+                border: `1px solid ${s.ok ? '#bfe3d0' : s.pending ? 'var(--border-strong)' : 'var(--border)'}`,
+                background: s.ok ? 'var(--ok-bg)' : s.pending ? 'var(--accent-soft)' : 'rgba(255,255,255,.42)',
+              }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: s.ok ? 'var(--accent3)' : s.pending ? 'var(--accent)' : 'var(--text-dim)' }}>
+                  {s.ok ? '✓ ' : s.pending ? '● ' : '○ '}{s.label}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>{s.hint}</div>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>{s.hint}</div>
+            ))}
+          </div>
+          <aside className="match-aside" style={{ backgroundImage: `url("${INTERIOR_IMAGES.architecture}")` }}>
+            <div className="match-aside-copy">
+              <span>FROM DRAWING TO SITE</span>
+              <h4>从图纸到现场</h4>
+              <p>确认方案后自动发布到接单市场，装修公司按真实报价与工期投标，平台全程监管、逐项可核对。</p>
             </div>
-          ))}
+          </aside>
         </div>
         {doneCount === STAGES.length && !order && !decision && (
           <button onClick={publishProject} className="btn btn-primary" style={{ marginTop: 12 }}>发布项目</button>
@@ -1262,15 +1378,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
           {showRecommend && (
             <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--accent2-soft)', border: '1px solid #e4d6bd', fontSize: 12, color: 'var(--text)' }}>
-              <span className="tag tag-purple" style={{ marginRight: 8 }}>AI 推荐</span>
+              <span className="tag tag-purple" style={{ marginRight: 8 }}>优选推荐</span>
               {recommended
                 ? `${recommended.name}（${recommended.score != null ? `匹配度 ${recommended.score}%` : `★${recommended.rating ?? '-'}`}）· 匹配理由：${recommended.reason}`
-                : '暂无 AI 推荐结果'}
+                : '暂无 优选推荐结果'}
             </div>
           )}
           {bids.length === 0 && (
             <p style={{ color: 'var(--text-dim)', fontSize: 12.5, margin: '12px 0 4px' }}>
-              ⏳ 已发布到接单市场，正在等待装修公司发布投标数据…（收到投标后匹配智能体「小桥」自动开始匹配）
+              ⏳ 已发布到接单市场，正在等待装修公司发布投标数据…（收到报价后自动开始综合匹配）
             </p>
           )}
           {bids.length > 0 && <table className="data-table" style={{marginTop:14}}><thead><tr><th>Company</th><th>Amount</th><th>Weeks</th></tr></thead><tbody>{bids.map(b=><tr key={b.id}><td>{b.companyName}</td><td>{b.amount}</td><td>{b.weeks}</td></tr>)}</tbody></table>}
@@ -1347,14 +1463,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           Platform fee is charged to the decoration company only. Homeowner pays nothing to the platform.
         </div>
       )}
-      <div style={{ marginTop: 24, display: 'flex', gap: 10, justifyContent: 'center' }}>
-        <span className="tag tag-cyan">STEP 01 识别→设计</span>
-        <span className="tag tag-purple">STEP 02 报价→工期</span>
-        <span className="tag tag-green">STEP 03 匹配→交付</span>
+      <div className="closing-steps">
+        <span>STEP 01 识别 → 设计</span>
+        <i />
+        <span>STEP 02 报价 → 工期</span>
+        <i />
+        <span>STEP 03 匹配 → 交付</span>
       </div>
 
       <p style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 11, marginTop: 20 }}>
-        由 I Renovation 智能体团队驱动 · 每 2 秒刷新 · 生成结果供参考，最终以签约量房为准
+        予舍 · 住宅设计与装修平台 · 生成结果供参考，最终以签约量房为准
       </p>
     </main>
   );
